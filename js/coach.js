@@ -13,6 +13,7 @@
   const SYSTEM = `Bạn là huấn luyện viên sức mạnh cho một người đã tập gym nhiều năm (không cần giải thích cơ bản).
 Bối cảnh: tập ở nhà với dumbbell, dây kháng lực, xà/công viên; có cardio nhẹ. Mục tiêu: duy trì/tăng cơ, khoẻ, bền vững; giấc ngủ là ràng buộc lớn.
 Dữ liệu dưới đây do app ghi: mỗi hiệp gồm kg × reps · RIR (reps còn dư). "(k)" = hiệp khởi động. Unilateral ghi reps bên A/B.
+Có thể có dữ liệu giấc ngủ, nhịp tim nghỉ, HRV, bước chân, calo tiêu hao (đồng hồ Xiaomi qua Health Connect) và calo/protein ăn vào: dùng chúng để chỉnh khối lượng tập theo hồi phục và đưa mục tiêu dinh dưỡng cụ thể (kcal, g protein) khi phù hợp.
 Nguyên tắc: dựa trên số liệu thực tế, nói ngắn gọn bằng tiếng Việt, ưu tiên 3–5 điểm quan trọng nhất, nêu rõ con số. Không bịa dữ liệu không có.`;
 
   const PROPOSAL_SPEC = `Sau phần nhận xét, trả về đúng MỘT khối \`\`\`json với cấu trúc:
@@ -35,8 +36,21 @@ Chỉ dùng templateId/exerciseId có trong danh sách. "add" = thêm bài có s
     out += '\n# SỐ HIỆP NẶNG / NHÓM CƠ / TUẦN (chính=1, phụ=0.5)\n';
     const ms = L.muscleSetsByWeek(db, 6);
     for (const [wk, m] of Object.entries(ms)) out += `${wk}: ${Object.entries(m).map(([k, v]) => `${k} ${v}`).join(', ') || 'không tập'}\n`;
-    const body = [...db.body].sort((a, b) => a.date.localeCompare(b.date)).slice(-8);
+    const body = [...db.body].sort((a, b) => a.date.localeCompare(b.date)).slice(-12);
     if (body.length) out += `\n# CÂN NẶNG\n${body.map(b => `${b.date}: ${b.kg}kg`).join(', ')}\n`;
+    const p = db.profile || {};
+    const t = L.nutritionTargets(db);
+    out += `\n# HỒ SƠ & DINH DƯỠNG\n${p.sex === 'female' ? 'Nữ' : 'Nam'}, ${p.heightCm || '?'}cm, ${p.age || '?'} tuổi. Mục tiêu: ${L.GOALS[t.goal].label}. ` +
+      (t.kcal ? `App đang đặt ${t.kcal} kcal, ${t.protein} g protein/ngày (tiêu hao ≈ ${t.tdee.value} kcal, ${t.tdee.method}). ` : 'Chưa đủ dữ liệu để tính mục tiêu. ') +
+      (t.trend !== null ? `Xu hướng cân nặng 21 ngày: ${t.trend} kg/tuần.` : '') + '\n';
+    const hdays = (db.health && db.health.days) || {};
+    const rows = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = L.addDays(L.localDate(), -i), h = hdays[d] || {}, it = L.intake(db, d);
+      const cells = [h.sleep && `ngủ ${h.sleep.h}h (sâu ${h.sleep.deepMin}′)`, h.restHr && `HR nghỉ ${h.restHr}`, h.hrv && `HRV ${h.hrv}`, h.steps && `${h.steps} bước`, h.totalKcal ? `tiêu hao ${h.totalKcal}` : h.activeKcal && `vận động ${h.activeKcal} kcal`, it.entries.length && `ăn ${it.kcal} kcal/${it.protein}g P`].filter(Boolean);
+      if (cells.length) rows.push(`${d}: ${cells.join(', ')}`);
+    }
+    if (rows.length) out += `\n# NGỦ / HỒI PHỤC / ĂN UỐNG (14 ngày, từ đồng hồ + nhật ký ăn)\n${rows.join('\n')}\n`;
     out += '\n# NHẬT KÝ\n' + L.summaryText(db, days);
     return out;
   }
@@ -108,7 +122,7 @@ Chỉ dùng templateId/exerciseId có trong danh sách. "add" = thêm bài có s
   }
 
   async function review(db, cfg, key) {
-    const text = await call(cfg, key, SYSTEM, context(db) + '\n\nNHIỆM VỤ: Đánh giá 4–6 tuần gần nhất (độ đều, tiến bộ từng bài chính, cân bằng nhóm cơ, hồi phục/giấc ngủ) và đề xuất chỉnh giáo án cho tuần tới.\n' + PROPOSAL_SPEC);
+    const text = await call(cfg, key, SYSTEM, context(db) + '\n\nNHIỆM VỤ: Đánh giá 4–6 tuần gần nhất (độ đều, tiến bộ từng bài chính, cân bằng nhóm cơ, hồi phục/giấc ngủ, cân nặng so với mục tiêu và calo/protein nếu có) và đề xuất chỉnh giáo án + dinh dưỡng cho tuần tới.\n' + PROPOSAL_SPEC);
     const p = extractProposal(text);
     return { text: text.replace(/```json[\s\S]*?```/, '').trim(), proposal: p ? { summary: p.summary || '', changes: validChanges(db, p) } : null };
   }

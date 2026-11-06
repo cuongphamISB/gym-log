@@ -31,7 +31,11 @@
   const round1 = n => Math.round(n * 10) / 10;
 
   function emptyDB() {
-    return { schema: SCHEMA, exercises: [], templates: [], workouts: [], body: [], settings: defaultSettings() };
+    return {
+      schema: SCHEMA, exercises: [], templates: [], workouts: [], body: [], settings: defaultSettings(),
+      profile: { sex: 'male', heightCm: null, age: null }, nutrition: { goal: 'maintain', proteinPerKg: null, days: {} },
+      health: { days: {}, sessions: [], lastSync: null },
+    };
   }
   function defaultSettings() {
     return { kgStep: 1, autoRest: true, sound: true, vibrate: true, lastBackupAt: null, createdAt: new Date().toISOString() };
@@ -338,6 +342,9 @@
     const db = Object.assign(emptyDB(), d);
     db.settings = Object.assign(defaultSettings(), d.settings || {});
     db.body = Array.isArray(d.body) ? d.body : [];
+    db.profile = Object.assign({ sex: 'male', heightCm: null, age: null }, d.profile || {});
+    db.nutrition = Object.assign({ goal: 'maintain', proteinPerKg: null, days: {} }, d.nutrition || {});
+    db.health = Object.assign({ days: {}, sessions: [], lastSync: null }, d.health || {});
     db.schema = SCHEMA;
     return db;
   }
@@ -395,6 +402,182 @@
     return added;
   }
 
+  // ---------- health (Health Connect via the Android app) ----------
+  // Sleep sessions -> per wake-up date. Overlapping sessions from several writers are de-duplicated.
+  function sleepByNight(samples) {
+    const sorted = [...(samples || [])].sort((a, b) => (b.hasStageData ? 1 : 0) - (a.hasStageData ? 1 : 0) || (new Date(b.endDate) - new Date(b.startDate)) - (new Date(a.endDate) - new Date(a.startDate)));
+    const kept = [];
+    for (const s of sorted) {
+      const a0 = +new Date(s.startDate), a1 = +new Date(s.endDate);
+      if (!(a1 > a0)) continue;
+      const dup = kept.some(k => { const b0 = +new Date(k.startDate), b1 = +new Date(k.endDate); return Math.min(a1, b1) - Math.max(a0, b0) > 0.5 * Math.min(a1 - a0, b1 - b0); });
+      if (!dup) kept.push(s);
+    }
+    const out = {};
+    for (const s of kept) {
+      const d = localDate(new Date(s.endDate));
+      const o = out[d] || (out[d] = { asleepMin: 0, inBedMin: 0, deepMin: 0, remMin: 0, lightMin: 0, awakeMin: 0, start: s.startDate, end: s.endDate, sessions: 0 });
+      o.sessions++;
+      if (s.startDate < o.start) o.start = s.startDate;
+      if (s.endDate > o.end) o.end = s.endDate;
+      const dur = (new Date(s.endDate) - new Date(s.startDate)) / 60000;
+      o.inBedMin += dur;
+      if (s.stages && s.stages.length) {
+        for (const st of s.stages) {
+          const m = st.durationMinutes || 0;
+          if (st.stage === 'awake' || st.stage === 'inBed') o.awakeMin += m;
+          else { o.asleepMin += m; if (st.stage === 'deep') o.deepMin += m; else if (st.stage === 'rem') o.remMin += m; else if (st.stage === 'light') o.lightMin += m; }
+        }
+      } else o.asleepMin += dur;
+    }
+    return out;
+  }
+  const median = a => { const s = a.filter(x => x !== null && x !== undefined && Number.isFinite(x)).sort((x, y) => x - y); if (!s.length) return null; const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+
+  // raw = { sleep, steps, activeKcal, totalKcal, restHr, hrv, weight, workouts } as returned by the plugin.
+  function ingestHealth(db, raw, nowIso = new Date().toISOString()) {
+    const H = db.health || (db.health = { days: {}, sessions: [], lastSync: null });
+    const day = d => H.days[d] || (H.days[d] = {});
+    const nights = sleepByNight(raw.sleep);
+    for (const [d, n] of Object.entries(nights)) {
+      day(d).sleep = { h: round1(n.asleepMin / 60), inBedH: round1(n.inBedMin / 60), deepMin: Math.round(n.deepMin), remMin: Math.round(n.remMin), lightMin: Math.round(n.lightMin), awakeMin: Math.round(n.awakeMin), start: n.start, end: n.end };
+    }
+    const agg = (arr, key) => { for (const s of arr || []) { const v = s.value; if (v === null || v === undefined || !Number.isFinite(v)) continue; day(localDate(new Date(s.startDate)))[key] = Math.round(v); } };
+    agg(raw.steps, 'steps'); agg(raw.activeKcal, 'activeKcal'); agg(raw.totalKcal, 'totalKcal');
+    const perDay = (arr, key, fn) => {
+      const g = {};
+      for (const s of arr || []) { const d = localDate(new Date(s.startDate)); (g[d] = g[d] || []).push(s.value); }
+      for (const [d, vs] of Object.entries(g)) day(d)[key] = fn(vs);
+    };
+    perDay(raw.restHr, 'restHr', vs => Math.round(Math.min(...vs)));
+    perDay(raw.hrv, 'hrv', vs => Math.round(vs.reduce((a, b) => a + b, 0) / vs.length));
+    for (const s of raw.weight || []) {
+      const d = localDate(new Date(s.startDate)), kg = round1(s.value);
+      const cur = db.body.find(b => b.date === d);
+      if (!cur) db.body.push({ date: d, kg, src: 'hc' });
+      else if (cur.src === 'hc') cur.kg = kg; // never overwrite a manual entry
+    }
+    for (const w of raw.workouts || []) {
+      const id = w.platformId || w.startDate;
+      const rec = {
+        id, type: w.workoutType, start: w.startDate, end: w.endDate, durationMin: Math.round((w.duration || 0) / 60),
+        kcal: w.totalEnergyBurned ? Math.round(w.totalEnergyBurned) : null, km: w.totalDistance ? round1(w.totalDistance / 1000) : null,
+        avgHr: w.avgHr || null, maxHr: w.maxHr || null, source: w.sourceName || w.sourceId || '',
+      };
+      const i = H.sessions.findIndex(x => x.id === id);
+      if (i >= 0) H.sessions[i] = Object.assign(H.sessions[i], rec); else H.sessions.push(rec);
+    }
+    H.sessions.sort((a, b) => a.start.localeCompare(b.start));
+    let matched = 0;
+    for (const w of finished(db)) if (fillFromHealth(db, w)) matched++;
+    H.lastSync = nowIso;
+    return { nights: Object.keys(nights).length, sessions: (raw.workouts || []).length, matched };
+  }
+  // Watch session that overlaps a logged workout (by time, or same date if the log has no times).
+  function matchSession(db, w) {
+    const ss = (db.health && db.health.sessions) || [];
+    if (w.startedAt && w.endedAt && w.endedAt > w.startedAt) {
+      const a0 = +new Date(w.startedAt), a1 = +new Date(w.endedAt);
+      let best = null, bestOv = 0;
+      for (const s of ss) { const ov = Math.min(a1, +new Date(s.end)) - Math.max(a0, +new Date(s.start)); if (ov > bestOv) { bestOv = ov; best = s; } }
+      if (best) return best;
+    }
+    const same = ss.filter(s => localDate(new Date(s.start)) === w.date);
+    return same.length === 1 ? same[0] : null;
+  }
+  function fillFromHealth(db, w) {
+    let changed = false;
+    const s = matchSession(db, w);
+    if (s) {
+      if (num(w.avgHr) === null && s.avgHr) { w.avgHr = s.avgHr; changed = true; }
+      if (num(w.kcal) === null && s.kcal) { w.kcal = s.kcal; changed = true; }
+      if (s.maxHr && num(w.maxHr) === null) { w.maxHr = s.maxHr; changed = true; }
+      w.hcSessionId = s.id;
+    }
+    const d = db.health && db.health.days[w.date];
+    if (num(w.sleepH) === null && d && d.sleep) { w.sleepH = d.sleep.h; changed = true; }
+    return changed;
+  }
+  // Recovery signal for a date: last night's sleep + resting HR / HRV against a 14-day baseline.
+  function readiness(db, date = localDate()) {
+    const days = (db.health && db.health.days) || {};
+    const d = days[date] || {};
+    const prev = [...Array(14)].map((_, i) => days[addDays(date, -i - 1)] || {});
+    const rBase = median(prev.map(x => x.restHr)), hBase = median(prev.map(x => x.hrv));
+    const sleepH = d.sleep ? d.sleep.h : null;
+    const rhrDelta = d.restHr && rBase ? d.restHr - rBase : null;
+    const hrvDelta = d.hrv && hBase ? Math.round((d.hrv - hBase) / hBase * 100) : null;
+    if (sleepH === null && rhrDelta === null && hrvDelta === null) return null;
+    let score = 0; const why = [];
+    if (sleepH !== null) { if (sleepH < 6) { score -= 2; why.push(`ngủ ${sleepH}h`); } else if (sleepH < 7) { score -= 1; why.push(`ngủ ${sleepH}h`); } else why.push(`ngủ ${sleepH}h`); }
+    if (rhrDelta !== null) { if (rhrDelta >= 7) { score -= 2; why.push(`nhịp tim nghỉ +${rhrDelta}`); } else if (rhrDelta >= 4) { score -= 1; why.push(`nhịp tim nghỉ +${rhrDelta}`); } }
+    if (hrvDelta !== null && hrvDelta <= -20) { score -= 1; why.push(`HRV ${hrvDelta}%`); }
+    return { level: score <= -2 ? 'low' : score < 0 ? 'mid' : 'good', sleepH, restHr: d.restHr || null, rhrDelta, hrv: d.hrv || null, hrvDelta, why, deepMin: d.sleep ? d.sleep.deepMin : null };
+  }
+
+  // ---------- nutrition ----------
+  const GOALS = { cut: { label: 'Giảm mỡ', kcal: -400, protein: 2.0 }, maintain: { label: 'Duy trì', kcal: 0, protein: 1.8 }, bulk: { label: 'Tăng cơ', kcal: 250, protein: 1.8 } };
+  function latestWeight(db, date = localDate()) {
+    const b = [...db.body].filter(x => x.date <= date).sort((x, y) => x.date.localeCompare(y.date));
+    return b.length ? b[b.length - 1].kg : null;
+  }
+  function bmr(profile, kg) {
+    const p = profile || {};
+    if (!kg || !p.heightCm || !p.age) return null;
+    return Math.round(10 * kg + 6.25 * p.heightCm - 5 * p.age + (p.sex === 'female' ? -161 : 5));
+  }
+  // Energy expenditure: watch total kcal if ≥3 recent days, else BMR×1.2 + watch active kcal, else BMR×1.45.
+  function tdee(db, date = localDate()) {
+    const days = (db.health && db.health.days) || {};
+    const prev = [...Array(7)].map((_, i) => days[addDays(date, -i - 1)] || {});
+    const tot = prev.map(x => x.totalKcal).filter(v => v > 800);
+    const kg = latestWeight(db, date), b = bmr(db.profile, kg);
+    if (tot.length >= 3) return { value: Math.round(tot.reduce((a, c) => a + c, 0) / tot.length), method: `TB ${tot.length} ngày từ đồng hồ` };
+    const act = prev.map(x => x.activeKcal).filter(v => v > 0);
+    if (b && act.length >= 3) return { value: Math.round(b * 1.2 + act.reduce((a, c) => a + c, 0) / act.length), method: `BMR×1.2 + vận động TB ${act.length} ngày` };
+    if (b) return { value: Math.round(b * 1.45), method: 'ước tính BMR×1.45 (chưa có dữ liệu đồng hồ)' };
+    return null;
+  }
+  function weightTrend(db, days = 21, date = localDate()) {
+    const pts = db.body.filter(b => b.date > addDays(date, -days) && b.date <= date).map(b => [(parseDate(b.date) - parseDate(date)) / 864e5, b.kg]);
+    if (pts.length < 3) return null;
+    const n = pts.length, mx = pts.reduce((a, p) => a + p[0], 0) / n, my = pts.reduce((a, p) => a + p[1], 0) / n;
+    const sxx = pts.reduce((a, p) => a + (p[0] - mx) ** 2, 0);
+    if (!sxx) return null;
+    const slope = pts.reduce((a, p) => a + (p[0] - mx) * (p[1] - my), 0) / sxx;
+    return Math.round(slope * 7 * 100) / 100; // kg per week
+  }
+  function nutritionTargets(db, date = localDate()) {
+    const n = db.nutrition || {};
+    const g = GOALS[n.goal || 'maintain'];
+    const kg = latestWeight(db, date), t = tdee(db, date);
+    return {
+      goal: n.goal || 'maintain', kg, tdee: t,
+      kcal: t ? Math.round((t.value + g.kcal) / 10) * 10 : null,
+      protein: kg ? Math.round(kg * (n.proteinPerKg || g.protein)) : null,
+      trend: weightTrend(db, 21, date),
+    };
+  }
+  function intake(db, date) {
+    const e = ((db.nutrition && db.nutrition.days && db.nutrition.days[date]) || {}).entries || [];
+    return { kcal: Math.round(e.reduce((a, x) => a + (num(x.kcal) || 0), 0)), protein: Math.round(e.reduce((a, x) => a + (num(x.p) || 0), 0)), entries: e };
+  }
+
+  // One row per day: sleep, watch data, body weight, intake. For analysis next to the per-set CSV.
+  const DAILY_COLS = ['date', 'sleep_h', 'deep_min', 'rem_min', 'awake_min', 'rest_hr', 'hrv_ms', 'steps', 'active_kcal', 'total_kcal', 'body_kg', 'intake_kcal', 'protein_g', 'workouts', 'hard_sets'];
+  function toDailyCSV(db) {
+    const days = (db.health && db.health.days) || {};
+    const dates = new Set([...Object.keys(days), ...db.body.map(b => b.date), ...Object.keys((db.nutrition && db.nutrition.days) || {}), ...finished(db).map(w => w.date)]);
+    const rows = [DAILY_COLS.join(',')];
+    for (const d of [...dates].sort()) {
+      const h = days[d] || {}, s = h.sleep || {}, it = intake(db, d), ws = finished(db).filter(w => w.date === d);
+      const body = db.body.find(b => b.date === d);
+      const r = { date: d, sleep_h: s.h, deep_min: s.deepMin, rem_min: s.remMin, awake_min: s.awakeMin, rest_hr: h.restHr, hrv_ms: h.hrv, steps: h.steps, active_kcal: h.activeKcal, total_kcal: h.totalKcal, body_kg: body && body.kg, intake_kcal: it.entries.length ? it.kcal : null, protein_g: it.entries.length ? it.protein : null, workouts: ws.length || null, hard_sets: ws.reduce((a, w) => a + workoutStats(w).sets, 0) || null };
+      rows.push(DAILY_COLS.map(c => csvCell(r[c])).join(','));
+    }
+    return '﻿' + rows.join('\r\n') + '\r\n';
+  }
+
   function byId(arr) { const o = {}; for (const x of arr) o[x.id] = x; return o; }
 
   const api = {
@@ -402,6 +585,8 @@
     emptyDB, seedDB, mergeSeed, normalizeDB, newWorkout, newItem, isDone, isWork, setReps, e1rm, setVolume, setFilled, describeSet,
     finished, sortedDesc, exerciseHistory, lastPerformance, bests, detectPR, suggestion, workoutStats, durationOf,
     muscleSetsByWeek, e1rmSeries, streakWeeks, CSV_COLS, toCSV, backupJSON, summaryText, parseBackup, importLegacyV4, mergeWorkouts,
+    sleepByNight, ingestHealth, matchSession, fillFromHealth, readiness, median,
+    GOALS, latestWeight, bmr, tdee, weightTrend, nutritionTargets, intake, DAILY_COLS, toDailyCSV,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.L = api;

@@ -1,0 +1,8 @@
+{
+  "appId": "io.github.cuongphamisb.gymlog",
+  "appName": "Gym Log",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#0a0c0f"
+  }
+}

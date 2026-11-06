@@ -1,15 +1,21 @@
 # Gym Log
 
-Offline-first PWA for logging gym workouts on a phone (Vietnamese UI).
+Offline-first gym logger (Vietnamese UI). Runs as a PWA (GitHub Pages) and as an Android app that reads Health Connect.
 
-- Strong/Hevy-style set table with "last time" column, auto rest timer (vibrate + beep), screen wake lock
+- Set table with "last time" column, auto rest timer (vibrate + beep), screen wake lock
 - PR detection (e1RM / heaviest / reps), double-progression suggestions
 - Weekly hard sets per muscle, 16-week heatmap, per-exercise e1RM chart, body weight
-- Editable exercises and templates; exercise guides from the original v4 catalog
-- Export: CSV (one row per set) and full JSON backup; imports old `FitnessCoach_v4_backup_*.json`
+- Android app: sleep (with stages), resting HR, HRV, steps, calories, weight and watch workouts from Health Connect
+  (e.g. Xiaomi Watch → Mi Fitness → Health Connect); readiness card; watch HR/kcal matched to logged workouts
+- Nutrition: kcal/protein quick log, targets from BMR or watch energy expenditure + goal, weight trend
+- Export: per-set CSV, per-day CSV (sleep, HR, steps, kcal, intake, weight), full JSON backup; imports old `FitnessCoach_v4_backup_*.json`
 - Optional AI coach (bring your own key: Anthropic or any OpenAI-compatible endpoint); you approve every change
-- Data lives in IndexedDB on the device; nothing is sent anywhere unless you press an AI coach button
+- All data stays on the device
 
-Run locally: `python -m http.server 8765` then open http://localhost:8765.
-Tests: `node --test test/logic.test.js`.
-Rebuild the catalog from the old HTML: `node tools/extract_catalog.js <old.html>`.
+| | |
+|---|---|
+| Web | https://cuongphamisb.github.io/gym-log/ |
+| Android APK | https://github.com/cuongphamISB/gym-log/releases/latest/download/GymLog.apk |
+
+Dev: `python -m http.server 8765` · tests `npm test` · Android `npm run sync` then build in Android Studio, or push to `main` and let `.github/workflows/android.yml` build a signed APK release.
+Catalog from the old HTML: `node tools/extract_catalog.js <old.html>`. Icons: `python tools/make_icons.py`, `python tools/make_android_icons.py`.

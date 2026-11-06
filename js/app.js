@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const L = self.L, Store = self.Store, Coach = self.Coach, SEED = self.SEED;
-  const VERSION = '1.0.0';
+  const VERSION = '1.1.0';
 
   // ---------- helpers ----------
   const $ = s => document.querySelector(s);
@@ -52,6 +52,7 @@
   // ---------- navigation (Android back button closes pages) ----------
   function open(o) { ui.stack.push(o); history.pushState({ depth: ui.stack.length }, ''); render(); }
   function back() { if (ui.stack.length) history.back(); }
+  function closeAllPages() { ui.stack.length = 0; history.replaceState({ depth: 0 }, ''); }
   function replaceTop(o) { ui.stack[ui.stack.length - 1] = o; render(); }
   window.addEventListener('popstate', e => {
     const d = (e.state && e.state.depth) || 0;
@@ -94,7 +95,7 @@
     const rec = db.templates.find(t => (t.days || []).includes(dow));
     const E = exMap();
     let h = `<div class="topbar"><div><div class="eyebrow">${DOW_LONG[dow]} · ${new Date().toLocaleDateString('vi-VN')}</div><h1>Hôm nay</h1></div><button class="iconbtn" data-act="open" data-page="settings" aria-label="Cài đặt">${I.gear}</button></div>`;
-    if (!window.matchMedia('(display-mode: standalone)').matches) {
+    if (!window.matchMedia('(display-mode: standalone)').matches && !(window.HealthSync && HealthSync.isNative())) {
       h += `<div class="notice info"><b>Cài app ra màn hình chính</b> để mở như app thật, chạy offline và Chrome không tự xoá dữ liệu.${installEvt ? ` <button class="btn sm pri" style="margin-top:8px" data-act="install">Cài đặt</button>` : ' Chrome ⋮ → <b>Thêm vào màn hình chính</b> → Cài đặt.'}</div>`;
     }
     const nDone = L.finished(db).length;
@@ -115,9 +116,18 @@
       h += `<div style="text-align:center;flex:1"><div class="tiny ${isT ? '' : 'dim'}" style="font-weight:700">${DOW[L.parseDate(d).getDay()]}</div><div style="margin:4px auto 0;width:30px;height:30px;border-radius:10px;display:grid;place-items:center;font-weight:800;font-size:13px;${on ? 'background:var(--acc);color:var(--acc-ink)' : isT ? 'border:1.5px solid var(--tx)' : planned ? 'border:1px dashed var(--dim);color:var(--dim)' : 'background:var(--s2);color:var(--dim)'}">${on ? '✓' : L.parseDate(d).getDate()}</div></div>`;
     }
     h += `</div></div>`;
-    // readiness
-    h += `<div class="section-t"><h2>Ngủ đêm qua</h2></div><div class="grid3">` + Object.entries(SLEEP).map(([k, v]) => `<button class="chip ${ui.sleep === k ? 'on' : ''}" style="flex-direction:column;min-height:52px;border-radius:14px;justify-content:center;gap:0" data-act="sleep" data-v="${k}"><span>${v[0]}</span><span class="tiny" style="opacity:.7">${v[1]}</span></button>`).join('') + `</div>`;
-    if (ui.sleep) h += `<p class="small" style="margin:8px 2px 0;color:${ui.sleep === 'good' ? 'var(--ok)' : 'var(--pr)'}">${SLEEP[ui.sleep][2]}</p>`;
+    // readiness: from the watch when synced, otherwise a manual pick
+    const rd = L.readiness(db, today);
+    if (rd) {
+      ui.sleep = rd.level;
+      const col = rd.level === 'good' ? 'var(--ok)' : rd.level === 'mid' ? 'var(--pr)' : 'var(--bad)';
+      h += `<div class="section-t"><h2>Hồi phục</h2><span class="tiny muted">từ đồng hồ</span></div><div class="card"><div class="between"><b style="color:${col};font-size:18px">${{ good: 'Tốt', mid: 'Trung bình', low: 'Thấp' }[rd.level]}</b><span class="small muted">${esc(rd.why.join(' · '))}</span></div>
+        <div class="grid3" style="margin-top:10px">${[['Ngủ', rd.sleepH !== null ? rd.sleepH + 'h' : '—'], ['Ngủ sâu', rd.deepMin ? rd.deepMin + '′' : '—'], ['Nhịp nghỉ', rd.restHr ? rd.restHr + (rd.rhrDelta !== null ? ` (${rd.rhrDelta >= 0 ? '+' : ''}${rd.rhrDelta})` : '') : '—']].map(([k, v]) => `<div><div class="tiny muted">${k}</div><b class="num">${v}</b></div>`).join('')}</div>
+        <p class="small" style="margin:10px 0 0;color:${col}">${SLEEP[rd.level][2]}</p></div>`;
+    } else {
+      h += `<div class="section-t"><h2>Ngủ đêm qua</h2></div><div class="grid3">` + Object.entries(SLEEP).map(([k, v]) => `<button class="chip ${ui.sleep === k ? 'on' : ''}" style="flex-direction:column;min-height:52px;border-radius:14px;justify-content:center;gap:0" data-act="sleep" data-v="${k}"><span>${v[0]}</span><span class="tiny" style="opacity:.7">${v[1]}</span></button>`).join('') + `</div>`;
+      if (ui.sleep) h += `<p class="small" style="margin:8px 2px 0;color:${ui.sleep === 'good' ? 'var(--ok)' : 'var(--pr)'}">${SLEEP[ui.sleep][2]}</p>`;
+    }
     // recommended
     if (rec && !active) {
       const last = L.sortedDesc(L.finished(db)).find(w => w.templateId === rec.id);
@@ -129,7 +139,40 @@
       h += `<button class="tpl" data-act="start" data-tpl="${t.id}"><span class="mark">${esc(t.short || t.name.slice(0, 1))}</span><b>${esc(t.name)}</b><span class="tiny muted">${t.items.length} bài${t.days && t.days.length ? ' · ' + t.days.map(d => DOW[d]).join(', ') : ''}</span></button>`;
     }
     h += `<button class="tpl" data-act="start" data-tpl=""><span class="mark">+</span><b>Buổi tự do</b><span class="tiny muted">Tự thêm bài khi tập</span></button></div>`;
+    h += nutritionCard(today);
     return h;
+  }
+  function meter(label, val, target, unit) {
+    const pct = target ? Math.min(100, val / target * 100) : 0;
+    const over = target && val > target * 1.05;
+    return `<div style="margin:8px 0"><div class="between small"><span class="muted">${label}</span><span class="num"><b>${val}</b>${target ? ` / ${target}` : ''} ${unit}</span></div><div class="mbar" style="display:block;margin:5px 0 0"><div class="track"><div class="fill" style="width:${pct}%;${over ? 'background:var(--pr)' : ''}"></div></div></div></div>`;
+  }
+  function nutritionCard(date) {
+    const t = L.nutritionTargets(db, date), it = L.intake(db, date);
+    let h = `<div class="section-t"><h2>Dinh dưỡng hôm nay</h2><button data-act="open" data-page="profile">${t.kcal ? L.GOALS[t.goal].label : 'Đặt mục tiêu'}</button></div><div class="card">`;
+    if (!t.kcal) h += `<p class="small muted" style="margin-top:0">Nhập chiều cao, tuổi và cân nặng để app tính mục tiêu calo/protein. Khi có dữ liệu từ đồng hồ, mức tiêu hao sẽ lấy theo thực tế.</p>`;
+    h += meter('Calo', it.kcal, t.kcal, 'kcal') + meter('Protein', it.protein, t.protein, 'g');
+    h += `<div class="row" style="margin-top:10px;gap:8px"><input class="inp num" id="nKcal" inputmode="numeric" placeholder="kcal" style="flex:1;min-width:0"><input class="inp num" id="nP" inputmode="numeric" placeholder="protein g" style="flex:1;min-width:0"><button class="btn pri" data-act="addFood" style="padding:0 14px">＋</button></div>
+      <input class="inp" id="nLabel" placeholder="Món (tuỳ chọn): cơm gà, whey…" style="margin-top:8px;min-height:40px">`;
+    if (it.entries.length) h += `<div style="margin-top:8px">${it.entries.map((e, i) => `<div class="between small" style="padding:6px 0;border-top:1px solid var(--line)"><span class="grow ellipsis">${esc(e.label || 'Bữa ' + (i + 1))} <span class="dim">${e.t ? new Date(e.t).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : ''}</span></span><span class="num">${L.num(e.kcal) || 0} kcal · ${L.num(e.p) || 0}g</span><button class="iconbtn" style="width:30px;height:30px;margin-left:8px;border-radius:9px" data-act="rmFood" data-i="${i}" aria-label="Xoá">${I.x}</button></div>`).join('')}</div>`;
+    if (t.tdee) h += `<p class="tiny dim" style="margin:8px 0 0">Tiêu hao ≈ ${t.tdee.value} kcal (${esc(t.tdee.method)})${t.trend !== null ? ` · cân nặng ${t.trend > 0 ? '+' : ''}${t.trend} kg/tuần (21 ngày)` : ''}</p>`;
+    return h + `</div>`;
+  }
+  function sleepChart(days) {
+    const H = (db.health && db.health.days) || {};
+    const today = L.localDate();
+    const pts = [...Array(days)].map((_, i) => { const d = L.addDays(today, i - days + 1); const s = H[d] && H[d].sleep; return { d, h: s ? s.h : null, deep: s ? s.deepMin / 60 : 0 }; });
+    if (!pts.some(p => p.h)) return '';
+    const W = 320, Hh = 110, bw = (W - 20) / days;
+    const y = v => Hh - 18 - v / 10 * (Hh - 26);
+    let bars = '';
+    pts.forEach((p, i) => {
+      if (!p.h) return;
+      const x = 10 + i * bw + 1;
+      bars += `<rect x="${x.toFixed(1)}" y="${y(p.h).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${(Hh - 18 - y(p.h)).toFixed(1)}" rx="2" fill="${p.h >= 7 ? '#3ddc97' : p.h >= 6 ? '#ffb627' : '#ff6b6b'}" opacity=".85"/>`;
+      if (p.deep) bars += `<rect x="${x.toFixed(1)}" y="${y(p.deep).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${(Hh - 18 - y(p.deep)).toFixed(1)}" rx="2" fill="#0a0c0f" opacity=".35"/>`;
+    });
+    return `<svg class="chart" viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Giấc ngủ"><line x1="10" x2="${W - 10}" y1="${y(7)}" y2="${y(7)}" stroke="#8d95a3" stroke-dasharray="3 3" opacity=".6"/><text x="${W - 10}" y="${y(7) - 3}" text-anchor="end">7h</text>${bars}<text x="10" y="${Hh - 4}">${fmtDate(pts[0].d)}</text><text x="${W - 10}" y="${Hh - 4}" text-anchor="end">hôm nay</text></svg>`;
   }
 
   // ---------- HISTORY ----------
@@ -165,6 +208,18 @@
     h += `<button class="card" style="display:flex;align-items:center;gap:12px;width:100%;text-align:left;margin-top:12px;border-color:#3d4d14;background:linear-gradient(160deg,#1b2210,#13161b)" data-act="open" data-page="coach"><span style="color:var(--acc);width:26px">${I.spark}</span><span class="grow"><b>AI Coach</b><br><span class="small muted">Đánh giá log, đề xuất chỉnh giáo án — bạn duyệt từng thay đổi</span></span><span class="dim">›</span></button>`;
     // heatmap
     h += `<div class="section-t"><h2>16 tuần gần nhất</h2></div><div class="card">${heatmap(today)}</div>`;
+    // sleep / recovery / intake from the watch + food log
+    const HD = (db.health && db.health.days) || {};
+    const last14 = [...Array(14)].map((_, i) => HD[L.addDays(today, -i)] || {});
+    const avg = a => { const v = a.filter(x => Number.isFinite(x)); return v.length ? v.reduce((p, c) => p + c, 0) / v.length : null; };
+    const sAvg = avg(last14.map(d => d.sleep && d.sleep.h)), rAvg = avg(last14.map(d => d.restHr)), stAvg = avg(last14.map(d => d.steps));
+    const nd = [...Array(7)].map((_, i) => L.intake(db, L.addDays(today, -i - 1))).filter(x => x.entries.length);
+    const tg = L.nutritionTargets(db, today);
+    if (sAvg !== null || nd.length) {
+      h += `<div class="section-t"><h2>Ngủ, hồi phục & ăn uống</h2><span class="tiny muted">14 ngày</span></div><div class="card">${sleepChart(14)}
+        <div class="grid3" style="margin-top:8px">${[['Ngủ TB', sAvg !== null ? L.round1(sAvg) + 'h' : '—'], ['Nhịp nghỉ TB', rAvg !== null ? Math.round(rAvg) : '—'], ['Bước/ngày', stAvg !== null ? Math.round(stAvg).toLocaleString('vi-VN') : '—']].map(([k, v]) => `<div><div class="tiny muted">${k}</div><b class="num">${v}</b></div>`).join('')}</div>
+        ${nd.length ? `<div class="grid2" style="margin-top:10px"><div><div class="tiny muted">Calo TB (${nd.length} ngày có ghi)</div><b class="num">${Math.round(avg(nd.map(x => x.kcal)))}${tg.kcal ? ` / ${tg.kcal}` : ''}</b></div><div><div class="tiny muted">Protein TB</div><b class="num">${Math.round(avg(nd.map(x => x.protein)))}${tg.protein ? ` / ${tg.protein}` : ''} g</b></div></div>` : ''}</div>`;
+    }
     // muscles
     const cur = ms[wks[wks.length - 1]];
     const muscles = [...new Set([...L.MUSCLES, ...wks.flatMap(wk => Object.keys(ms[wk]))])];
@@ -350,7 +405,7 @@
     let h = head('Kết thúc buổi', esc(w.name));
     h += `<div class="stats" style="margin-bottom:12px"><div class="stat"><div class="v num">${st.sets}</div><div class="k">hiệp nặng</div></div><div class="stat"><div class="v num">${st.volume ? fmtKg(st.volume) : '—'}</div><div class="k">khối lượng</div></div><div class="stat"><div class="v num">${prs.length}</div><div class="k">PR</div></div></div>`;
     if (prs.length) h += `<div class="card" style="border-color:#6b5112"><h3 style="color:var(--pr)">🏆 Kỷ lục mới</h3>${prs.map(p => `<div class="small">${esc(p)}</div>`).join('')}</div>`;
-    h += `<div class="card"><div class="grid2"><div class="field"><label class="f">Thời lượng (phút)</label><input class="inp num" data-wf="durationMin" inputmode="numeric" value="${esc(w.durationMin ?? mins)}"></div><div class="field"><label class="f">Ngủ đêm qua (giờ)</label><input class="inp num" data-wf="sleepH" inputmode="decimal" value="${esc(w.sleepH ?? '')}" placeholder="VD: 6,5"></div></div>
+    h += `<div class="card"><div class="grid2"><div class="field"><label class="f">Thời lượng (phút)</label><input class="inp num" data-wf="durationMin" inputmode="numeric" value="${esc(w.durationMin ?? mins)}"></div><div class="field"><label class="f">Ngủ đêm qua (giờ)</label><input class="inp num" data-wf="sleepH" inputmode="decimal" value="${esc(w.sleepH ?? '')}" placeholder="${(db.health && db.health.days[w.date] && db.health.days[w.date].sleep) ? db.health.days[w.date].sleep.h + ' (đồng hồ)' : 'VD: 6,5'}"></div></div>
       <label class="f">RPE cả buổi (1 nhẹ – 10 kiệt sức)</label><div class="chips" style="margin-bottom:12px">${[5, 6, 7, 8, 9, 10].map(v => `<button class="chip ${L.num(w.rpe) === v ? 'on' : ''}" data-act="rpe" data-id="${w.id}" data-v="${v}">${v}</button>`).join('')}</div>
       <div class="grid2"><div class="field"><label class="f">Nhịp tim TB (đồng hồ)</label><input class="inp num" data-wf="avgHr" inputmode="numeric" value="${esc(w.avgHr ?? '')}" placeholder="bpm"></div><div class="field"><label class="f">kcal (đồng hồ)</label><input class="inp num" data-wf="kcal" inputmode="numeric" value="${esc(w.kcal ?? '')}"></div></div>
       <div class="field"><label class="f">Cân nặng hôm nay (tuỳ chọn)</label><input class="inp num" id="finBody" inputmode="decimal" value="${todayBody ? todayBody.kg : ''}" placeholder="kg"></div>
@@ -443,7 +498,7 @@
     const fin = L.finished(db).length;
     let h = head('Cài đặt & dữ liệu', `${fin} buổi · ${db.exercises.length} bài`);
     h += `<div class="section-t"><h2>Xuất / sao lưu</h2></div><div class="card"><p class="small muted" style="margin-top:0">Lần sao lưu gần nhất: <b style="color:var(--tx)">${s.lastBackupAt ? new Date(s.lastBackupAt).toLocaleString('vi-VN') : 'chưa có'}</b></p>
-      <div class="grid2"><button class="btn" data-act="backup">Sao lưu JSON</button><button class="btn" data-act="csv">Xuất CSV</button>${navigator.canShare ? `<button class="btn" data-act="shareBackup">Gửi backup (Drive, Zalo…)</button>` : ''}<button class="btn" data-act="copySummary">Copy log 4 tuần cho AI</button></div>
+      <div class="grid2"><button class="btn" data-act="backup">Sao lưu JSON</button><button class="btn" data-act="csv">CSV từng hiệp</button><button class="btn" data-act="csvDaily">CSV theo ngày</button>${navigator.canShare ? `<button class="btn" data-act="shareBackup">Gửi backup (Drive, Zalo…)</button>` : ''}<button class="btn" data-act="copySummary">Copy log 4 tuần cho AI</button></div>
       <p class="tiny muted" style="margin-bottom:0">CSV: mỗi hiệp một dòng (ngày, bài, kg, reps, RIR, e1RM, khối lượng…), mở được bằng Excel/Sheets/pandas. JSON: bản sao đầy đủ để khôi phục.</p></div>`;
     h += `<div class="section-t"><h2>Nhập dữ liệu</h2></div><div class="card"><button class="btn wide" data-act="import">Nhập file backup…</button><p class="tiny muted" style="margin-bottom:0">Nhận file backup của app này (thay toàn bộ dữ liệu) hoặc <b>FitnessCoach_v4_backup_*.json</b> từ file HTML cũ (gộp thêm, không trùng lặp).</p>
       <button class="btn ghost wide" style="margin-top:8px" data-act="restoreSnap">Khôi phục bản tự lưu đầu ngày</button></div>`;
@@ -453,9 +508,39 @@
       <label class="switch"><span>Tự bật đồng hồ nghỉ khi tick hiệp</span><input type="checkbox" data-setting="autoRest" ${s.autoRest ? 'checked' : ''}></label>
       <label class="switch"><span>Âm báo hết giờ nghỉ</span><input type="checkbox" data-setting="sound" ${s.sound ? 'checked' : ''}></label>
       <label class="switch"><span>Rung khi hết giờ nghỉ</span><input type="checkbox" data-setting="vibrate" ${s.vibrate ? 'checked' : ''}></label></div>`;
-    h += `<div class="section-t"><h2>Đồng hồ Xiaomi / Mi Fitness</h2></div><div class="card small muted">Web app không đọc được Health Connect. Khi kết thúc buổi, nhập nhịp tim TB, kcal và giờ ngủ từ Mi Fitness vào ô tương ứng — chúng có trong file CSV.</div>`;
+    h += `<div class="section-t"><h2>Đồng hồ · Health Connect</h2></div><div class="card small">`;
+    if (window.HealthSync && HealthSync.isNative()) {
+      const H = db.health || {};
+      const nights = Object.values(H.days || {}).filter(d => d.sleep).length;
+      h += `<div class="between"><span>Trạng thái</span><b style="color:${db.settings.hcConnected ? 'var(--ok)' : 'var(--pr)'}">${db.settings.hcConnected ? 'Đã kết nối' : 'Chưa kết nối'}</b></div>
+        <div class="between" style="margin-top:6px"><span>Lần đồng bộ cuối</span><b>${H.lastSync ? new Date(H.lastSync).toLocaleString('vi-VN') : '—'}</b></div>
+        <div class="between" style="margin-top:6px"><span>Đã có</span><b>${nights} đêm ngủ · ${(H.sessions || []).length} buổi từ đồng hồ</b></div>
+        ${ui.hcErrors ? `<p class="tiny" style="color:var(--pr)">Lỗi đọc: ${esc(Object.entries(ui.hcErrors).map(([k, v]) => k + ': ' + v).join('; '))}</p>` : ''}
+        <div class="grid2" style="margin-top:12px"><button class="btn ${db.settings.hcConnected ? '' : 'pri'}" data-act="hcConnect">${db.settings.hcConnected ? 'Cấp lại quyền' : 'Kết nối'}</button><button class="btn" data-act="hcSync" ${ui.hcBusy ? 'disabled' : ''}>${ui.hcBusy ? '<span class="spinner"></span>' : 'Đồng bộ ngay'}</button></div>
+        <button class="btn ghost wide" style="margin-top:8px" data-act="hcSettings">Mở cài đặt Health Connect</button>
+        <p class="tiny muted" style="margin-bottom:0">Đọc: giấc ngủ, nhịp tim, nhịp tim nghỉ, HRV, bước chân, calo, cân nặng, buổi tập (Mi Fitness ghi vào Health Connect). App tự đồng bộ khi mở, tối đa mỗi giờ một lần. Chỉ đọc, không ghi.</p>`;
+    } else {
+      h += `<p style="margin-top:0">Bản web không đọc được Health Connect. Cài <b>bản Android</b> để app tự lấy giấc ngủ, nhịp tim, calo, bước chân, cân nặng và buổi tập từ Xiaomi Watch (qua Mi Fitness → Health Connect).</p>
+        <a class="btn pri wide" href="https://github.com/cuongphamISB/gym-log/releases/latest/download/GymLog.apk" style="text-decoration:none">Tải APK</a>
+        <p class="tiny muted" style="margin-bottom:0">Dữ liệu bản web và bản APK tách riêng: sao lưu JSON ở đây rồi nhập vào bản APK.</p>`;
+    }
+    h += `</div><div class="section-t"><h2>Hồ sơ & dinh dưỡng</h2></div><button class="card" style="display:flex;width:100%;text-align:left;align-items:center" data-act="open" data-page="profile"><span class="grow small">${db.profile && db.profile.heightCm ? `${db.profile.heightCm} cm · ${db.profile.age} tuổi · mục tiêu ${L.GOALS[(db.nutrition || {}).goal || 'maintain'].label}` : 'Chưa nhập chiều cao/tuổi'}</span><span class="dim">›</span></button>`;
     h += `<p class="tiny dim" style="text-align:center;margin-top:20px">Gym Log v${VERSION} · dữ liệu chỉ nằm trên máy này</p>`;
     setTimeout(async () => { const e = await Store.estimate(); const el = $('#usage'); if (el && e) el.textContent = (e.usage / 1048576).toFixed(1) + ' MB'; }, 0);
+    return h;
+  };
+
+  PAGES.profile = () => {
+    const p = db.profile || {}, n = db.nutrition || {};
+    const t = L.nutritionTargets(db);
+    let h = head('Hồ sơ & dinh dưỡng', 'Dùng để tính calo, protein');
+    h += `<div class="card"><div class="grid3"><div class="field"><label class="f">Giới tính</label><select class="inp" data-prof="sex"><option value="male" ${p.sex !== 'female' ? 'selected' : ''}>Nam</option><option value="female" ${p.sex === 'female' ? 'selected' : ''}>Nữ</option></select></div>
+      <div class="field"><label class="f">Cao (cm)</label><input class="inp num" inputmode="numeric" data-prof="heightCm" value="${esc(p.heightCm ?? '')}"></div><div class="field"><label class="f">Tuổi</label><input class="inp num" inputmode="numeric" data-prof="age" value="${esc(p.age ?? '')}"></div></div>
+      <p class="tiny muted" style="margin:0">Cân nặng lấy từ mục Cân nặng (tab Tiến bộ) hoặc từ Health Connect. Hiện tại: <b>${t.kg ? t.kg + ' kg' : 'chưa có'}</b></p></div>
+      <div class="card"><label class="f">Mục tiêu</label><div class="chips" style="margin-bottom:12px">${Object.entries(L.GOALS).map(([k, g]) => `<button class="chip ${(n.goal || 'maintain') === k ? 'on' : ''}" data-act="goal" data-v="${k}">${g.label} ${g.kcal ? (g.kcal > 0 ? '+' : '') + g.kcal : '±0'}</button>`).join('')}</div>
+      <div class="field" style="margin:0"><label class="f">Protein (g/kg) — để trống = ${L.GOALS[n.goal || 'maintain'].protein}</label><input class="inp num" inputmode="decimal" data-nut="proteinPerKg" value="${esc(n.proteinPerKg ?? '')}"></div></div>`;
+    h += `<div class="card small">${t.kcal ? `Mục tiêu hiện tại: <b>${t.kcal} kcal</b> · <b>${t.protein} g protein</b><br><span class="muted">Tiêu hao ≈ ${t.tdee.value} kcal — ${esc(t.tdee.method)}</span>` : '<span class="muted">Nhập đủ chiều cao, tuổi và cân nặng để tính.</span>'}${t.trend !== null ? `<br><span class="muted">Xu hướng cân nặng 21 ngày: ${t.trend > 0 ? '+' : ''}${t.trend} kg/tuần</span>` : ''}</div>
+      <p class="tiny muted">AI Coach thấy các số này cùng log tập, giấc ngủ và calo để điều chỉnh. Muốn tăng cơ khô: tăng ~0,25 kg/tuần; giảm mỡ: giảm 0,3–0,7 kg/tuần.</p>`;
     return h;
   };
 
@@ -542,7 +627,7 @@
       else if (!want && wakeLock) { await wakeLock.release(); wakeLock = null; }
     } catch (e) { wakeLock = null; }
   }
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { syncWakeLock(); tick(); } });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { syncWakeLock(); tick(); if (db) healthSync(false); } });
 
   // ---------- toast / io ----------
   let toastT = null;
@@ -551,6 +636,14 @@
     clearTimeout(toastT); toastT = setTimeout(() => { $('#toast-root').innerHTML = ''; }, kind === 'pr' ? 3800 : 2600);
   }
   function download(name, text, mime) {
+    const P = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() && window.Capacitor.Plugins;
+    if (P && P.Filesystem && P.Share) {
+      // Android WebView cannot follow <a download>: write to app cache, then open the share sheet (Drive, Files, Zalo…)
+      P.Filesystem.writeFile({ path: name, data: text, directory: 'CACHE', encoding: 'utf8' })
+        .then(r => P.Share.share({ title: name, files: [r.uri], dialogTitle: 'Lưu / gửi ' + name }))
+        .catch(e => { if (!/cancel/i.test(e.message || '')) alert('Không xuất được file: ' + e.message); });
+      return;
+    }
     const blob = new Blob([text], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
@@ -634,6 +727,7 @@
       for (const f of ['durationMin', 'sleepH', 'avgHr', 'kcal']) w[f] = L.num(w[f]);
       const bk = L.num(($('#finBody') || {}).value);
       if (bk) { db.body = db.body.filter(x => x.date !== w.date); db.body.push({ date: w.date, kg: bk }); }
+      L.fillFromHealth(db, w); // sleep now; watch HR/kcal arrive on a later sync and are matched then
       rest = null; save(); Store.flush();
       toast('Đã lưu buổi tập 💪');
       ui.stack.pop(); ui.stack[ui.stack.length - 1] = { type: 'view', id: w.id }; history.back();
@@ -697,7 +791,7 @@
       const { db: snap, meta } = await Store.loadSnapshot();
       if (!snap) { toast('Chưa có bản tự lưu'); return; }
       if (!confirm(`Khôi phục dữ liệu về bản tự lưu ngày ${meta && meta.date}? (${(snap.workouts || []).filter(w => w.status === 'done').length} buổi). Thay đổi sau thời điểm đó sẽ mất.`)) return;
-      db = L.mergeSeed(L.normalizeDB(snap), SEED); save(); render(); toast('Đã khôi phục');
+      db = L.mergeSeed(L.normalizeDB(snap), SEED); closeAllPages(); save(); render(); toast('Đã khôi phục');
     },
     restAdj: b => { if (rest) { rest.endAt += +b.dataset.v * 1000; rest.total = Math.max(rest.total, (rest.endAt - Date.now()) / 1000); rest.alerted = false; tick(); } },
     restStop: () => { rest = null; renderRest(); },
@@ -707,6 +801,31 @@
       aiKey = $('#aiKey').value.trim();
       await Store.put('aiKey', aiKey); save(); toast('Đã lưu cấu hình'); render();
     },
+    addFood: () => {
+      const kcal = L.num($('#nKcal').value), p = L.num($('#nP').value);
+      if (kcal === null && p === null) { toast('Nhập kcal hoặc protein'); return; }
+      const d = L.localDate();
+      db.nutrition = db.nutrition || { goal: 'maintain', days: {} };
+      const day = db.nutrition.days[d] || (db.nutrition.days[d] = { entries: [] });
+      day.entries.push({ t: new Date().toISOString(), kcal: kcal || 0, p: p || 0, label: $('#nLabel').value.trim() });
+      save(); render();
+    },
+    rmFood: b => { const d = db.nutrition.days[L.localDate()]; if (!d) return; d.entries.splice(+b.dataset.i, 1); save(); render(); },
+    goal: b => { db.nutrition.goal = b.dataset.v; save(); render(); },
+    csvDaily: () => { download(`GymLog_daily_${stamp()}.csv`, L.toDailyCSV(db), 'text/csv;charset=utf-8'); toast('Đã tải CSV theo ngày'); },
+    hcConnect: async () => {
+      try {
+        const av = await HealthSync.available();
+        if (!av.available) { alert('Health Connect không khả dụng: ' + (av.reason || '')); return; }
+        const st = await HealthSync.connect();
+        db.settings.hcConnected = (st.readAuthorized || []).length > 0;
+        save();
+        if (!db.settings.hcConnected) { toast('Chưa cấp quyền nào'); render(); return; }
+        await healthSync(true);
+      } catch (e) { alert('Không kết nối được: ' + e.message); }
+    },
+    hcSync: () => healthSync(true),
+    hcSettings: () => HealthSync.openSettings().catch(e => toast(e.message)),
     aiReview: () => runCoach(() => Coach.review(db, db.settings.ai, aiKey), null),
     aiAsk: () => { const q = $('#aiQ').value.trim(); if (!q) { toast('Nhập câu hỏi'); return; } runCoach(() => Coach.ask(db, db.settings.ai, aiKey, q), q); },
     aiApply: () => {
@@ -730,6 +849,22 @@
       tp.items.push({ exerciseId: e.id, sets: e.type === 'cardio' ? 1 : 3, repLow: e.type === 'cardio' ? null : 8, repHigh: e.type === 'cardio' ? null : 12, rest: 90 });
       save(); back();
     }
+  }
+  // Pull the last 30 days from Health Connect. Automatic runs are throttled to once an hour.
+  async function healthSync(manual) {
+    if (!window.HealthSync || !HealthSync.isNative() || !db.settings.hcConnected || ui.hcBusy) return;
+    if (!manual && db.health && db.health.lastSync && Date.now() - new Date(db.health.lastSync) < 3600e3) return;
+    ui.hcBusy = true; if (manual) render();
+    try {
+      const firstSync = !(db.health && db.health.lastSync);
+      const { raw, errors } = await HealthSync.fetchAll(firstSync ? 90 : 30);
+      const r = L.ingestHealth(db, raw);
+      ui.hcErrors = Object.keys(errors).length ? errors : null;
+      save();
+      if (manual) toast(`Đồng bộ xong: ${r.nights} đêm ngủ, ${r.sessions} buổi từ đồng hồ${r.matched ? `, khớp ${r.matched} buổi tập` : ''}`);
+    } catch (e) { ui.hcErrors = { sync: e.message }; if (manual) toast('Lỗi đồng bộ: ' + e.message); }
+    ui.hcBusy = false;
+    if (!top() || top().type === 'settings') render();
   }
   async function runCoach(fn, q) {
     ui.coachBusy = true; ui.coachResult = null; render();
@@ -760,12 +895,15 @@
     else if (d.wf) { const w = wById(top().id); if (w) { if (d.wf === 'date') { if (t.value) w.date = t.value; } else w[d.wf] = t.value; save(); } }
     else if (d.tf) { const tp = db.templates.find(x => x.id === top().id); if (tp) { tp[d.tf] = t.value; save(); } }
     else if (d.ti !== undefined) { const tp = db.templates.find(x => x.id === top().id); if (tp) { tp.items[+d.ti][d.tif] = L.num(t.value); save(); } }
+    else if (d.prof) { db.profile[d.prof] = d.prof === 'sex' ? t.value : L.num(t.value); save(); }
+    else if (d.nut) { db.nutrition[d.nut] = L.num(t.value); save(); }
     else if (t.id === 'libQ') { ui.libQ = t.value; $('#libList').innerHTML = libraryList(); }
     else if (t.id === 'pickQ') { ui.pickQ = t.value; $('#pickList').innerHTML = pickList(); }
   });
   document.addEventListener('change', e => {
-    const t = e.target, k = t.dataset.setting;
+    const t = e.target, d = t.dataset, k = t.dataset.setting;
     if (k) { db.settings[k] = t.type === 'checkbox' ? t.checked : Number(t.value); save(); }
+    if (d && (d.prof || d.nut)) render();
     if (t.id === 'aiProv') { const p = Coach.PRESETS[t.value]; $('#aiUrl').value = p.baseUrl; $('#aiModel').value = p.model; }
   });
   // select-all on focus makes overwriting numbers one tap
@@ -788,6 +926,7 @@
         const n = r.db.workouts.filter(w => w.status === 'done').length;
         if (!confirm(`File có ${n} buổi. THAY THẾ toàn bộ dữ liệu hiện tại (${L.finished(db).length} buổi)?`)) return;
         db = L.mergeSeed(r.db, SEED);
+        closeAllPages();
       } else {
         const added = L.mergeWorkouts(db, r.workouts);
         alert(`Đã nhập ${added} buổi từ file v4 cũ${r.drafts ? ` (gồm ${r.drafts} nháp chưa xác nhận, có ghi "nháp v4")` : ''}.${r.warnings.length ? '\n\nCảnh báo:\n' + r.warnings.join('\n') : ''}${added < r.workouts.length ? `\n${r.workouts.length - added} buổi đã có sẵn nên bỏ qua.` : ''}`);
@@ -812,7 +951,9 @@
     save();
     Store.snapshotDaily(db, L.localDate()).catch(() => {});
     persisted = await Store.persist();
-    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    const native = window.HealthSync && HealthSync.isNative();
+    if (native) { persisted = true; healthSync(false); } // app storage is not evicted like browser storage
+    if (!native && 'serviceWorker' in navigator && location.protocol !== 'file:') {
       navigator.serviceWorker.register('sw.js').catch(() => {});
       let had = !!navigator.serviceWorker.controller;
       navigator.serviceWorker.addEventListener('controllerchange', () => { if (had) toast('Đã có bản cập nhật — đóng & mở lại app để dùng'); had = true; });

@@ -140,3 +140,82 @@ test('mergeSeed keeps user edits and adds new built-ins', () => {
   assert.equal(db.exercises.length, 25);
   assert.equal(db.exercises[0].name, 'My press');
 });
+
+// ---------- health + nutrition ----------
+function rawHealth() {
+  return {
+    sleep: [
+      { startDate: '2026-11-05T16:30:00.000Z', endDate: '2026-11-05T23:30:00.000Z', hasStageData: true, stages: [
+        { stage: 'light', durationMinutes: 240 }, { stage: 'deep', durationMinutes: 90 }, { stage: 'rem', durationMinutes: 60 }, { stage: 'awake', durationMinutes: 30 }] },
+      // same night written by another app without stages -> must be de-duplicated
+      { startDate: '2026-11-05T16:35:00.000Z', endDate: '2026-11-05T23:20:00.000Z' },
+    ],
+    steps: [{ startDate: '2026-11-05T17:00:00.000Z', value: 8123.4 }],
+    activeKcal: [{ startDate: '2026-11-05T17:00:00.000Z', value: 512 }],
+    totalKcal: [],
+    restHr: [{ startDate: '2026-11-06T01:00:00.000Z', value: 58 }, { startDate: '2026-11-06T05:00:00.000Z', value: 55 }],
+    hrv: [],
+    weight: [{ startDate: '2026-11-06T00:30:00.000Z', value: 70.84 }],
+    workouts: [{ platformId: 'hc1', workoutType: 'strengthTraining', duration: 3000, totalEnergyBurned: 310.6, startDate: '2026-11-06T01:00:00.000Z', endDate: '2026-11-06T01:50:00.000Z', avgHr: 121, maxHr: 158 }],
+  };
+}
+
+test('sleepByNight: wake-date bucketing, stages, de-dup', () => {
+  const n = L.sleepByNight(rawHealth().sleep);
+  const d = L.localDate(new Date('2026-11-05T23:30:00.000Z'));
+  assert.deepEqual(Object.keys(n), [d]);
+  assert.equal(n[d].asleepMin, 390);
+  assert.equal(n[d].deepMin, 90);
+  assert.equal(n[d].sessions, 1);
+});
+
+test('ingestHealth fills days, body weight (not over manual), and matches workouts', () => {
+  const db = L.normalizeDB(L.seedDB(SEED));
+  const w = doneWorkout(db, L.localDate(new Date('2026-11-06T01:10:00.000Z')), 'strength-a-0', [{ kg: 20, reps: 10 }]);
+  w.startedAt = '2026-11-06T01:05:00.000Z'; w.endedAt = '2026-11-06T01:55:00.000Z';
+  const r = L.ingestHealth(db, rawHealth());
+  assert.equal(r.matched, 1);
+  assert.equal(w.avgHr, 121); assert.equal(w.kcal, 311);
+  const wd = L.localDate(new Date('2026-11-05T23:30:00.000Z'));
+  assert.equal(db.health.days[wd].sleep.h, 6.5);
+  assert.equal(db.body.length, 1); assert.equal(db.body[0].src, 'hc');
+  // a manual weight on the same day is never overwritten; re-sync is idempotent
+  db.body[0] = { date: db.body[0].date, kg: 71.5 };
+  L.ingestHealth(db, rawHealth());
+  assert.equal(db.body[0].kg, 71.5);
+  assert.equal(db.health.sessions.length, 1);
+});
+
+test('readiness levels from sleep and resting HR baseline', () => {
+  const db = L.normalizeDB(L.seedDB(SEED));
+  const today = '2026-11-07';
+  for (let i = 1; i <= 14; i++) db.health.days[L.addDays(today, -i)] = { restHr: 55 };
+  db.health.days[today] = { sleep: { h: 7.4 }, restHr: 56 };
+  assert.equal(L.readiness(db, today).level, 'good');
+  db.health.days[today] = { sleep: { h: 5.5 }, restHr: 63 };
+  const r = L.readiness(db, today);
+  assert.equal(r.level, 'low'); assert.equal(r.rhrDelta, 8);
+  assert.equal(L.readiness(L.normalizeDB(L.seedDB(SEED)), today), null);
+});
+
+test('nutrition targets: BMR fallback, watch TDEE, goal offsets, trend', () => {
+  const db = L.normalizeDB(L.seedDB(SEED));
+  const today = '2026-11-07';
+  assert.equal(L.nutritionTargets(db, today).kcal, null);
+  db.profile = { sex: 'male', heightCm: 180, age: 30 };
+  db.body.push({ date: '2026-10-20', kg: 72 }, { date: '2026-10-27', kg: 71.5 }, { date: '2026-11-03', kg: 71 });
+  assert.equal(L.bmr(db.profile, 71), 1690);
+  let t = L.nutritionTargets(db, today);
+  assert.equal(t.kcal, Math.round(1690 * 1.45 / 10) * 10);
+  assert.equal(t.protein, 128);
+  assert.equal(t.trend, -0.5);
+  for (let i = 1; i <= 4; i++) db.health.days[L.addDays(today, -i)] = { totalKcal: 2600 };
+  db.nutrition.goal = 'cut';
+  t = L.nutritionTargets(db, today);
+  assert.equal(t.tdee.value, 2600); assert.equal(t.kcal, 2200); assert.equal(t.protein, 142);
+  db.nutrition.days[today] = { entries: [{ kcal: 600, p: 40 }, { kcal: '450,5', p: 30 }] };
+  assert.deepEqual([L.intake(db, today).kcal, L.intake(db, today).protein], [1051, 70]);
+  const csv = L.toDailyCSV(db).trim().split('\r\n');
+  assert.equal(csv[0].replace('﻿', ''), L.DAILY_COLS.join(','));
+  assert.ok(csv.some(l => l.startsWith(today) && l.includes(',1051,70,')));
+});
