@@ -1,0 +1,21 @@
+{
+  "name": "Gym Log",
+  "short_name": "Gym Log",
+  "description": "Nhật ký tập gym offline: ghi hiệp, đồng hồ nghỉ, PR, tiến bộ, xuất CSV.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0c0f",
+  "theme_color": "#0a0c0f",
+  "lang": "vi",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Bắt đầu tập", "url": "./", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
