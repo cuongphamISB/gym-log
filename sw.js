@@ -1,8 +1,8 @@
 // Offline-first app shell. Bump VERSION on every deploy.
-const VERSION = 'gymlog-v1.1.0';
+const VERSION = 'gymlog-v1.2.0';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/logic.js', 'js/seed.js', 'js/store.js', 'js/coach.js', 'js/health.js', 'js/app.js',
+  'js/logic.js', 'js/seed.js', 'js/store.js', 'js/coach.js', 'js/health.js', 'js/charts.js', 'js/app.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png',
 ];
 self.addEventListener('install', e => {

@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const L = self.L, Store = self.Store, Coach = self.Coach, SEED = self.SEED;
-  const VERSION = '1.1.0';
+  const VERSION = '1.2.0';
 
   // ---------- helpers ----------
   const $ = s => document.querySelector(s);
@@ -85,7 +85,7 @@
     return `<div class="page-head"><button class="iconbtn" data-act="back" aria-label="Quay lại">${I.back}</button><div class="t"><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</div>${right}</div>`;
   }
   function thumb(ex, cls = '') {
-    return ex && ex.image ? `<img src="${esc(ex.image)}" alt="" loading="lazy" class="${cls}">` : `<div class="ph">${esc(((ex && ex.name) || '?').slice(0, 1))}</div>`;
+    return ex && ex.image ? `<img src="${esc(ex.image)}" alt="" loading="lazy" class="${cls}">` : `<div class="ph ${cls}">${esc(((ex && ex.name) || '?').slice(0, 1))}</div>`;
   }
 
   // ---------- TODAY ----------
@@ -121,7 +121,7 @@
     if (rd) {
       ui.sleep = rd.level;
       const col = rd.level === 'good' ? 'var(--ok)' : rd.level === 'mid' ? 'var(--pr)' : 'var(--bad)';
-      h += `<div class="section-t"><h2>Hồi phục</h2><span class="tiny muted">từ đồng hồ</span></div><div class="card"><div class="between"><b style="color:${col};font-size:18px">${{ good: 'Tốt', mid: 'Trung bình', low: 'Thấp' }[rd.level]}</b><span class="small muted">${esc(rd.why.join(' · '))}</span></div>
+      h += `<div class="section-t"><h2>Hồi phục</h2><button data-act="open" data-page="health" data-id="sleep" data-range="day">Chi tiết ›</button></div><div class="card"><div class="between"><b style="color:${col};font-size:18px">${{ good: 'Tốt', mid: 'Trung bình', low: 'Thấp' }[rd.level]}</b><span class="small muted">${esc(rd.why.join(' · '))}</span></div>
         <div class="grid3" style="margin-top:10px">${[['Ngủ', rd.sleepH !== null ? rd.sleepH + 'h' : '—'], ['Ngủ sâu', rd.deepMin ? rd.deepMin + '′' : '—'], ['Nhịp nghỉ', rd.restHr ? rd.restHr + (rd.rhrDelta !== null ? ` (${rd.rhrDelta >= 0 ? '+' : ''}${rd.rhrDelta})` : '') : '—']].map(([k, v]) => `<div><div class="tiny muted">${k}</div><b class="num">${v}</b></div>`).join('')}</div>
         <p class="small" style="margin:10px 0 0;color:${col}">${SLEEP[rd.level][2]}</p></div>`;
     } else {
@@ -215,9 +215,10 @@
     const sAvg = avg(last14.map(d => d.sleep && d.sleep.h)), rAvg = avg(last14.map(d => d.restHr)), stAvg = avg(last14.map(d => d.steps));
     const nd = [...Array(7)].map((_, i) => L.intake(db, L.addDays(today, -i - 1))).filter(x => x.entries.length);
     const tg = L.nutritionTargets(db, today);
-    if (sAvg !== null || nd.length) {
+    if (sAvg !== null || nd.length || Object.keys(HD).length) {
       h += `<div class="section-t"><h2>Ngủ, hồi phục & ăn uống</h2><span class="tiny muted">14 ngày</span></div><div class="card">${sleepChart(14)}
         <div class="grid3" style="margin-top:8px">${[['Ngủ TB', sAvg !== null ? L.round1(sAvg) + 'h' : '—'], ['Nhịp nghỉ TB', rAvg !== null ? Math.round(rAvg) : '—'], ['Bước/ngày', stAvg !== null ? Math.round(stAvg).toLocaleString('vi-VN') : '—']].map(([k, v]) => `<div><div class="tiny muted">${k}</div><b class="num">${v}</b></div>`).join('')}</div>
+        <div class="grid3" style="margin-top:12px;gap:8px"><button class="btn sm" data-act="open" data-page="health" data-id="sleep">Ngủ</button><button class="btn sm" data-act="open" data-page="health" data-id="hr">Nhịp tim</button><button class="btn sm" data-act="open" data-page="health" data-id="activity">Hoạt động</button></div>
         ${nd.length ? `<div class="grid2" style="margin-top:10px"><div><div class="tiny muted">Calo TB (${nd.length} ngày có ghi)</div><b class="num">${Math.round(avg(nd.map(x => x.kcal)))}${tg.kcal ? ` / ${tg.kcal}` : ''}</b></div><div><div class="tiny muted">Protein TB</div><b class="num">${Math.round(avg(nd.map(x => x.protein)))}${tg.protein ? ` / ${tg.protein}` : ''} g</b></div></div>` : ''}</div>`;
     }
     // muscles
@@ -421,11 +422,18 @@
     const meta = [[dur, 'phút'], [st.sets, 'hiệp'], [st.volume ? fmtKg(st.volume) : null, 'khối lượng'], [w.rpe, 'RPE'], [w.sleepH, 'giờ ngủ'], [w.avgHr, 'bpm TB'], [w.kcal, 'kcal']].filter(m => m[0] !== null && m[0] !== undefined && m[0] !== '');
     h += `<div class="stats" style="grid-template-columns:repeat(${Math.min(4, meta.length || 1)},1fr);margin-bottom:12px">${meta.map(m => `<div class="stat"><div class="v num" style="font-size:20px">${esc(m[0])}</div><div class="k">${m[1]}</div></div>`).join('')}</div>`;
     if (w.notes) h += `<div class="card small">${esc(w.notes)}</div>`;
+    const ses = w.hcSessionId && db.health && (db.health.sessions || []).find(x => x.id === w.hcSessionId);
+    if (ses && ses.hr && ses.hr.length > 1) {
+      const mx = L.maxHrFor(db), zm = L.zoneMinutes(ses.hr, mx), zt = zm.reduce((a, c) => a + c, 0) || 1;
+      h += `<div class="card"><div class="between"><b>Nhịp tim (đồng hồ)</b><span class="small muted">TB ${ses.avgHr || '—'} · max ${ses.maxHr || '—'} · ${ses.kcal || '—'} kcal</span></div>${Charts.hrZoneCurve(ses.hr, mx, L.HR_ZONES)}` +
+        L.HR_ZONES.map(([n, f], i) => `<div class="mbar" style="grid-template-columns:118px 1fr 44px"><span class="small"><i style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${Charts.C.zones[i]};margin-right:6px"></i>${n} <span class="dim tiny">${Math.round(f * mx)}+</span></span><div class="track"><div class="fill" style="width:${zm[i] / zt * 100}%;background:${Charts.C.zones[i]}"></div></div><b class="num small" style="text-align:right">${Math.round(zm[i])}′</b></div>`).join('') +
+        `<p class="tiny dim" style="margin:6px 0 0">Vùng theo % nhịp tim tối đa ước tính ${mx} bpm${db.profile && db.profile.age ? '' : ' (nhập tuổi trong Hồ sơ để chính xác hơn)'}.</p></div>`;
+    }
     for (const it of w.items) {
       const done = it.sets.filter(L.isDone);
       if (!done.length) continue;
       const ex = exMap()[it.exerciseId];
-      h += `<div class="card"><div class="row" style="margin-bottom:8px">${thumb(ex, '')}<div class="grow"><b>${esc(it.name)}</b>${it.note ? `<div class="small muted">${esc(it.note)}</div>` : ''}</div></div>`;
+      h += `<div class="card"><div class="row" style="margin-bottom:8px">${thumb(ex, 'thumb')}<div class="grow"><b>${esc(it.name)}</b>${it.note ? `<div class="small muted">${esc(it.note)}</div>` : ''}</div></div>`;
       let n = 0;
       h += done.map(s => `<div class="between small" style="padding:5px 0;border-top:1px solid var(--line)"><span class="dim" style="width:26px">${s.warmup ? 'K' : ++n}</span><span class="grow num">${esc(L.describeSet(s, it.type))}</span>${L.e1rm(s, it.type) ? `<span class="tiny dim">e1RM ${L.e1rm(s, it.type)}</span>` : ''}${s.pr && s.pr.length ? '<span class="badge pr" style="margin-left:6px">PR</span>' : ''}</div>`).join('');
       h += `</div>`;
@@ -529,6 +537,113 @@
     setTimeout(async () => { const e = await Store.estimate(); const el = $('#usage'); if (el && e) el.textContent = (e.usage / 1048576).toFixed(1) + ' MB'; }, 0);
     return h;
   };
+
+  // ---------- health detail (sleep / heart rate / activity × day / week / month) ----------
+  const durTxt = m => m >= 60 ? `${Math.floor(m / 60)}<small> giờ </small>${Math.round(m % 60)}<small> phút</small>` : `${Math.round(m)}<small> phút</small>`;
+  function healthRange(range, anchor) {
+    if (range === 'day') return [anchor];
+    if (range === 'week') { const s = L.weekStart(anchor); return [...Array(7)].map((_, i) => L.addDays(s, i)); }
+    const d = L.parseDate(anchor), first = L.localDate(new Date(d.getFullYear(), d.getMonth(), 1));
+    const n = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    return [...Array(n)].map((_, i) => L.addDays(first, i));
+  }
+  function rangeLabel(range, dates) {
+    if (range === 'day') return fmtLong(dates[0]);
+    if (range === 'week') return `${fmtDate(dates[0])} – ${fmtDate(dates[6])}`;
+    const d = L.parseDate(dates[0]); return `Tháng ${d.getMonth() + 1}/${d.getFullYear()}`;
+  }
+  const dayLabel = (range, d, i) => range === 'week' ? DOW[L.parseDate(d).getDay()] : String(L.parseDate(d).getDate());
+  function bigStat(value, sub) { return `<div style="margin:6px 2px 10px"><div style="font-size:30px;font-weight:850;letter-spacing:-.8px" class="num">${value}</div>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`; }
+  function legend(items) { return `<div class="row wrap" style="gap:12px;margin-top:6px">${items.map(([c, l]) => `<span class="tiny muted"><i style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${c};margin-right:5px"></i>${l}</span>`).join('')}</div>`; }
+
+  PAGES.health = t => {
+    const metric = t.id || 'sleep', range = ui.hRange || 'day', anchor = ui.hDate || L.localDate();
+    const HD = (db.health && db.health.days) || {};
+    const dates = healthRange(range, anchor);
+    const today = L.localDate();
+    let h = head('Sức khoẻ', db.health && db.health.lastSync ? 'Đồng bộ ' + new Date(db.health.lastSync).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : 'Dữ liệu từ Health Connect');
+    h += `<div class="seg">${[['sleep', 'Ngủ'], ['hr', 'Nhịp tim'], ['activity', 'Hoạt động']].map(([k, l]) => `<button class="${metric === k ? 'on' : ''}" data-act="hMetric" data-v="${k}">${l}</button>`).join('')}</div>`;
+    h += `<div class="row" style="margin-bottom:12px;gap:8px"><div class="chips" style="flex:1">${[['day', 'Ngày'], ['week', 'Tuần'], ['month', 'Tháng']].map(([k, l]) => `<button class="chip ${range === k ? 'on' : ''}" data-act="hRange" data-v="${k}">${l}</button>`).join('')}</div></div>`;
+    const canNext = dates[dates.length - 1] < today;
+    h += `<div class="between" style="margin-bottom:6px"><button class="iconbtn" data-act="hNav" data-d="-1" aria-label="Trước">${I.back}</button><b class="small">${rangeLabel(range, dates)}</b><button class="iconbtn" data-act="hNav" data-d="1" aria-label="Sau" ${canNext ? '' : 'disabled style="opacity:.3"'}><span style="display:block;transform:scaleX(-1)">${I.back}</span></button></div>`;
+    const days = dates.map(d => ({ d, o: HD[d] || {} }));
+    if (metric === 'sleep') h += healthSleep(range, days);
+    else if (metric === 'hr') h += healthHr(range, days);
+    else h += healthActivity(range, days);
+    if (!Object.keys(HD).length) h += `<div class="notice info">Chưa có dữ liệu. ${window.HealthSync && HealthSync.isNative() ? 'Vào Cài đặt → Đồng hồ · Health Connect → Kết nối.' : 'Dữ liệu đồng hồ chỉ có ở bản Android (Cài đặt → Tải APK).'}</div>`;
+    return h;
+  };
+  function healthSleep(range, days) {
+    const SC = Charts.C.sleep, SN = Charts.C.sleepName;
+    let h = '';
+    if (range === 'day') {
+      const s = days[0].o.sleep;
+      if (!s) return `<div class="card empty"><b>Không có dữ liệu ngủ</b>Đêm trước ngày này chưa có trong Health Connect.</div>`;
+      const asleep = s.h * 60;
+      h += `<div class="card">${bigStat(durTxt(asleep), `${Charts.hm(Math.round(new Date(s.start) / 60000))} – ${Charts.hm(Math.round(new Date(s.end) / 60000))} · nằm ${durTxt(s.inBedH * 60).replace(/<[^>]+>/g, '')}`)}${Charts.hypnogram(s.seg)}</div>`;
+      const parts = [['d', s.deepMin], ['l', s.lightMin], ['r', s.remMin], ['a', s.awakeMin]].filter(p => p[1]);
+      if (parts.length) {
+        const tot = parts.reduce((a, p) => a + p[1], 0);
+        h += `<div class="card">` + parts.map(([k, m]) => `<div style="margin:6px 0 10px"><div class="between small"><span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${SC[k]};margin-right:8px"></i>${SN[k]}</span><span class="num"><b>${durTxt(m).replace(/<[^>]+>/g, '')}</b> <span class="muted">· ${Math.round(m / tot * 100)}%</span></span></div><div class="mbar" style="display:block;margin:5px 0 0"><div class="track"><div class="fill" style="width:${m / tot * 100}%;background:${SC[k]}"></div></div></div></div>`).join('') +
+          `<p class="tiny dim" style="margin:4px 0 0">Tham khảo người trưởng thành: ngủ sâu ~13–23%, REM ~20–25% thời gian ngủ; ngủ 7–9 giờ.</p></div>`;
+      }
+      const r = L.readiness(db, days[0].d);
+      if (r && r.restHr) h += `<div class="card small">Nhịp tim nghỉ sáng đó: <b>${r.restHr}</b>${r.rhrDelta !== null ? ` (${r.rhrDelta >= 0 ? '+' : ''}${r.rhrDelta} so với 14 ngày)` : ''}${r.hrv ? ` · HRV <b>${r.hrv}</b> ms` : ''}</div>`;
+      return h;
+    }
+    const nights = days.map(({ d, o }) => o.sleep ? { d, s: o.sleep } : { d, s: null });
+    const have = nights.filter(n => n.s);
+    if (!have.length) return `<div class="card empty"><b>Không có dữ liệu ngủ</b>trong khoảng này.</div>`;
+    const avg = have.reduce((a, n) => a + n.s.h, 0) / have.length;
+    const every = range === 'month' ? 5 : 1;
+    h += `<div class="card">${bigStat(durTxt(avg * 60), `trung bình ${have.length} đêm · ${have.filter(n => n.s.h >= 7).length} đêm ≥ 7 giờ`)}` +
+      Charts.bars(nights.map((n, i) => ({ label: dayLabel(range, n.d, i), v: n.s ? Math.max(n.s.h, n.s.inBedH || 0) : 0, parts: n.s ? (n.s.deepMin || n.s.lightMin || n.s.remMin ? [[n.s.deepMin / 60, SC.d], [n.s.lightMin / 60, SC.l], [n.s.remMin / 60, SC.r], [n.s.awakeMin / 60, SC.a]] : [[n.s.h, SC.u]]) : null })), { target: 7, color: '#8d95a3', labelEvery: every, title: 'Giờ ngủ' }) +
+      legend([[SC.d, 'Sâu'], [SC.l, 'Nông'], [SC.r, 'REM'], [SC.a, 'Thức']]) + `</div>`;
+    const bed = have.map(n => new Date(n.s.start)), wake = have.map(n => new Date(n.s.end));
+    const avgClock = ds => { const m = ds.map(x => { let v = x.getHours() * 60 + x.getMinutes(); if (v < 12 * 60) v += 1440; return v; }); const a = Math.round(m.reduce((p, c) => p + c, 0) / m.length) % 1440; return `${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`; };
+    const avgWake = (() => { const m = wake.map(x => x.getHours() * 60 + x.getMinutes()); const a = Math.round(m.reduce((p, c) => p + c, 0) / m.length); return `${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`; })();
+    h += `<div class="section-t"><h2>Độ đều giờ ngủ</h2><span class="tiny muted">ngủ TB ${avgClock(bed)} · dậy TB ${avgWake}</span></div><div class="card">${Charts.regularity(nights.map((n, i) => ({ label: dayLabel(range, n.d, i), every, start: n.s ? Math.round(new Date(n.s.start) / 60000) : null, end: n.s ? Math.round(new Date(n.s.end) / 60000) : null })))}</div>`;
+    const tot = k => have.reduce((a, n) => a + (n.s[k] || 0), 0);
+    const all = tot('deepMin') + tot('lightMin') + tot('remMin');
+    if (all) h += `<div class="card small">${[['d', 'deepMin'], ['l', 'lightMin'], ['r', 'remMin']].map(([k, f]) => `<div class="between" style="padding:4px 0"><span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${SC[k]};margin-right:8px"></i>${SN[k]}</span><b class="num">${Math.round(tot(f) / have.length)}′/đêm · ${Math.round(tot(f) / all * 100)}%</b></div>`).join('')}</div>`;
+    return h;
+  }
+  function healthHr(range, days) {
+    let h = '';
+    if (range === 'day') {
+      const o = days[0].o;
+      const items = [...Array(24)].map((_, hr) => { const v = o.hrH && o.hrH[hr]; return { label: hr % 6 === 0 ? String(hr) : '', min: v && v[0], max: v && v[1], avg: v && v[2] }; });
+      if (!o.hrH && !o.restHr) return `<div class="card empty"><b>Không có dữ liệu nhịp tim</b>cho ngày này.</div>`;
+      h += `<div class="card">${bigStat(o.hrMin ? `${o.hrMin}–${o.hrMax}<small> bpm</small>` : '—', [o.restHr && `nghỉ ${o.restHr} bpm`, o.hrv && `HRV ${o.hrv} ms`].filter(Boolean).join(' · '))}${Charts.rangeBars(items, { title: 'Nhịp tim theo giờ', line: o.restHr })}${legend([[Charts.C.hr, 'thấp nhất – cao nhất'], ['#fff', 'trung bình'], [Charts.C.hrv, 'nhịp tim nghỉ']])}</div>`;
+      const ws = L.finished(db).filter(w => w.date === days[0].d && w.avgHr);
+      if (ws.length) h += `<div class="card small">${ws.map(w => `<div class="between"><span>${esc(w.name)}</span><b>${w.avgHr} TB${w.maxHr ? ' · ' + w.maxHr + ' max' : ''}</b></div>`).join('')}</div>`;
+      return h;
+    }
+    const every = range === 'month' ? 5 : 1;
+    const rest = days.filter(x => x.o.restHr);
+    h += `<div class="card">${bigStat(rest.length ? Math.round(rest.reduce((a, x) => a + x.o.restHr, 0) / rest.length) + '<small> bpm</small>' : '—', 'nhịp tim nghỉ trung bình')}${Charts.rangeBars(days.map((x, i) => ({ label: dayLabel(range, x.d, i), min: x.o.hrMin, max: x.o.hrMax, avg: x.o.restHr })), { labelEvery: every, title: 'Nhịp tim theo ngày' }) || '<p class="small muted">Chưa có nhịp tim theo ngày.</p>'}${legend([[Charts.C.hr, 'thấp – cao trong ngày'], ['#fff', 'nhịp nghỉ']])}</div>`;
+    if (rest.length > 1) h += `<div class="section-t"><h2>Nhịp tim nghỉ</h2><span class="tiny muted">thấp hơn = hồi phục tốt hơn</span></div><div class="card">${lineChart(rest.map(x => ({ x: x.d, y: x.o.restHr })), 'bpm')}</div>`;
+    const hrv = days.filter(x => x.o.hrv);
+    if (hrv.length > 1) h += `<div class="section-t"><h2>HRV</h2><span class="tiny muted">cao hơn = hồi phục tốt hơn</span></div><div class="card">${lineChart(hrv.map(x => ({ x: x.d, y: x.o.hrv })), 'ms')}</div>`;
+    return h;
+  }
+  function healthActivity(range, days) {
+    const goal = db.settings.stepGoal || 8000;
+    let h = '';
+    if (range === 'day') {
+      const o = days[0].o;
+      if (!o.steps && !o.activeKcal) return `<div class="card empty"><b>Không có dữ liệu hoạt động</b>cho ngày này.</div>`;
+      h += `<div class="card">${bigStat((o.steps || 0).toLocaleString('vi-VN') + '<small> bước</small>', `mục tiêu ${goal.toLocaleString('vi-VN')} · ${o.activeKcal || 0} kcal vận động${o.totalKcal ? ` · tổng ${o.totalKcal} kcal` : ''}`)}`;
+      if (o.stepsH) h += Charts.bars([...Array(24)].map((_, hr) => ({ label: hr % 6 === 0 ? String(hr) : '', v: o.stepsH[hr] || 0 })), { color: Charts.C.steps, title: 'Bước theo giờ' });
+      return h + `</div>`;
+    }
+    const every = range === 'month' ? 5 : 1;
+    const st = days.filter(x => x.o.steps);
+    h += `<div class="card">${bigStat(st.length ? Math.round(st.reduce((a, x) => a + x.o.steps, 0) / st.length).toLocaleString('vi-VN') + '<small> bước/ngày</small>' : '—', `${st.filter(x => x.o.steps >= goal).length}/${st.length} ngày đạt ${goal.toLocaleString('vi-VN')}`)}${Charts.bars(days.map((x, i) => ({ label: dayLabel(range, x.d, i), v: x.o.steps || 0 })), { color: Charts.C.steps, hitColor: '#36d16f', target: goal, labelEvery: every, title: 'Bước chân' })}</div>`;
+    const kc = days.filter(x => x.o.activeKcal);
+    if (kc.length) h += `<div class="section-t"><h2>Calo vận động</h2><span class="tiny muted">TB ${Math.round(kc.reduce((a, x) => a + x.o.activeKcal, 0) / kc.length)} kcal/ngày</span></div><div class="card">${Charts.bars(days.map((x, i) => ({ label: dayLabel(range, x.d, i), v: x.o.activeKcal || 0 })), { color: Charts.C.kcal, labelEvery: every, title: 'Calo vận động' })}</div>`;
+    return h;
+  }
 
   PAGES.profile = () => {
     const p = db.profile || {}, n = db.nutrition || {};
@@ -663,7 +778,7 @@
   const ACT = {
     tab: b => { ui.tab = b.dataset.tab; window.scrollTo(0, 0); render(); },
     back: () => back(),
-    open: b => { const page = b.dataset.page; if (page === 'picker') ui.pickQ = ''; open({ type: page, id: b.dataset.id || '' }); },
+    open: b => { const page = b.dataset.page; if (page === 'picker') ui.pickQ = ''; if (page === 'health') { ui.hDate = null; if (b.dataset.range) ui.hRange = b.dataset.range; } open({ type: page, id: b.dataset.id || '' }); },
     install: async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; render(); },
     sleep: b => { ui.sleep = ui.sleep === b.dataset.v ? null : b.dataset.v; render(); },
     start: b => {
@@ -801,6 +916,14 @@
       aiKey = $('#aiKey').value.trim();
       await Store.put('aiKey', aiKey); save(); toast('Đã lưu cấu hình'); render();
     },
+    hMetric: b => replaceTop({ type: 'health', id: b.dataset.v }),
+    hRange: b => { ui.hRange = b.dataset.v; render(); },
+    hNav: b => {
+      const r = ui.hRange || 'day', a = ui.hDate || L.localDate(), d = +b.dataset.d;
+      let n = r === 'day' ? L.addDays(a, d) : r === 'week' ? L.addDays(a, 7 * d) : (() => { const x = L.parseDate(a); return L.localDate(new Date(x.getFullYear(), x.getMonth() + d, 1)); })();
+      if (n > L.localDate()) n = L.localDate();
+      ui.hDate = n; render();
+    },
     addFood: () => {
       const kcal = L.num($('#nKcal').value), p = L.num($('#nP').value);
       if (kcal === null && p === null) { toast('Nhập kcal hoặc protein'); return; }
@@ -853,12 +976,14 @@
   // Pull the last 30 days from Health Connect. Automatic runs are throttled to once an hour.
   async function healthSync(manual) {
     if (!window.HealthSync || !HealthSync.isNative() || !db.settings.hcConnected || ui.hcBusy) return;
-    if (!manual && db.health && db.health.lastSync && Date.now() - new Date(db.health.lastSync) < 3600e3) return;
+    if (!manual && db.health && db.health.lastSync && (db.health.v || 1) >= 2 && Date.now() - new Date(db.health.lastSync) < 3600e3) return;
     ui.hcBusy = true; if (manual) render();
     try {
-      const firstSync = !(db.health && db.health.lastSync);
+      // 90 days on first sync, and once more when the stored detail format changes (v2: sleep stages, hourly HR/steps, workout HR)
+      const firstSync = !(db.health && db.health.lastSync) || (db.health.v || 1) < 2;
       const { raw, errors } = await HealthSync.fetchAll(firstSync ? 90 : 30);
       const r = L.ingestHealth(db, raw);
+      db.health.v = 2;
       ui.hcErrors = Object.keys(errors).length ? errors : null;
       save();
       if (manual) toast(`Đồng bộ xong: ${r.nights} đêm ngủ, ${r.sessions} buổi từ đồng hồ${r.matched ? `, khớp ${r.matched} buổi tập` : ''}`);

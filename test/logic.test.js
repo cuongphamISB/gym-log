@@ -219,3 +219,28 @@ test('nutrition targets: BMR fallback, watch TDEE, goal offsets, trend', () => {
   assert.equal(csv[0].replace('﻿', ''), L.DAILY_COLS.join(','));
   assert.ok(csv.some(l => l.startsWith(today) && l.includes(',1051,70,')));
 });
+
+test('detail health data: sleep segments, summed total kcal, hourly HR/steps, workout HR zones', () => {
+  const db = L.normalizeDB(L.seedDB(SEED));
+  const raw = rawHealth();
+  raw.sleep[0].stages = [
+    { stage: 'light', startDate: '2026-11-05T16:30:00.000Z', endDate: '2026-11-05T20:30:00.000Z', durationMinutes: 240 },
+    { stage: 'deep', startDate: '2026-11-05T20:30:00.000Z', endDate: '2026-11-05T22:00:00.000Z', durationMinutes: 90 },
+  ];
+  raw.totalKcal = [{ startDate: '2026-11-06T01:00:00.000Z', value: 1200.4 }, { startDate: '2026-11-06T09:00:00.000Z', value: 1300.2 }];
+  raw.hrHourly = [{ startDate: '2026-11-06T01:00:00.000Z', values: { min: 60, max: 150, average: 98.6 } }, { startDate: '2026-11-06T02:00:00.000Z', values: { min: 55, max: 80, average: 66 } }];
+  raw.stepsHourly = [{ startDate: '2026-11-06T01:00:00.000Z', value: 1500 }];
+  raw.workouts[0].hrSeries = [[0, 100], [30, 140], [60, 160], [90, 175]];
+  L.ingestHealth(db, raw);
+  const wd = L.localDate(new Date('2026-11-05T23:30:00.000Z'));
+  assert.equal(db.health.days[wd].sleep.seg.length, 2);
+  assert.equal(db.health.days[wd].sleep.seg[1][2], 'd');
+  const d6 = L.localDate(new Date('2026-11-06T01:00:00.000Z'));
+  assert.equal(db.health.days[d6].totalKcal, 2501);
+  assert.equal(db.health.days[d6].hrMin, 55); assert.equal(db.health.days[d6].hrMax, 150);
+  assert.deepEqual(Object.values(db.health.days[d6].stepsH), [1500]);
+  assert.equal(db.health.sessions[0].hr.length, 4);
+  // zones with max HR 190: 100=52%->z0, 140=73%->z2, 160=84%->z3, 175=92%->z4
+  assert.deepEqual(L.zoneMinutes(db.health.sessions[0].hr, 190), [0.5, 0, 0.5, 0.5, 0.5]);
+  assert.equal(L.maxHrFor({ profile: { age: 30 } }), 187);
+});

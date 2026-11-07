@@ -414,9 +414,13 @@
       if (!dup) kept.push(s);
     }
     const out = {};
+    const CODE = { deep: 'd', light: 'l', rem: 'r', awake: 'a', inBed: 'a', asleep: 'u' };
+    const em = iso => Math.round(new Date(iso).getTime() / 60000); // epoch minutes
     for (const s of kept) {
       const d = localDate(new Date(s.endDate));
-      const o = out[d] || (out[d] = { asleepMin: 0, inBedMin: 0, deepMin: 0, remMin: 0, lightMin: 0, awakeMin: 0, start: s.startDate, end: s.endDate, sessions: 0 });
+      const o = out[d] || (out[d] = { asleepMin: 0, inBedMin: 0, deepMin: 0, remMin: 0, lightMin: 0, awakeMin: 0, start: s.startDate, end: s.endDate, sessions: 0, seg: [] });
+      if (s.stages && s.stages.length) for (const st of s.stages) { if (st.startDate && st.endDate) o.seg.push([em(st.startDate), em(st.endDate), CODE[st.stage] || 'u']); }
+      else o.seg.push([em(s.startDate), em(s.endDate), 'u']);
       o.sessions++;
       if (s.startDate < o.start) o.start = s.startDate;
       if (s.endDate > o.end) o.end = s.endDate;
@@ -440,10 +444,26 @@
     const day = d => H.days[d] || (H.days[d] = {});
     const nights = sleepByNight(raw.sleep);
     for (const [d, n] of Object.entries(nights)) {
-      day(d).sleep = { h: round1(n.asleepMin / 60), inBedH: round1(n.inBedMin / 60), deepMin: Math.round(n.deepMin), remMin: Math.round(n.remMin), lightMin: Math.round(n.lightMin), awakeMin: Math.round(n.awakeMin), start: n.start, end: n.end };
+      day(d).sleep = { h: round1(n.asleepMin / 60), inBedH: round1(n.inBedMin / 60), deepMin: Math.round(n.deepMin), remMin: Math.round(n.remMin), lightMin: Math.round(n.lightMin), awakeMin: Math.round(n.awakeMin), start: n.start, end: n.end, seg: n.seg.sort((a, b) => a[0] - b[0]) };
     }
     const agg = (arr, key) => { for (const s of arr || []) { const v = s.value; if (v === null || v === undefined || !Number.isFinite(v)) continue; day(localDate(new Date(s.startDate)))[key] = Math.round(v); } };
-    agg(raw.steps, 'steps'); agg(raw.activeKcal, 'activeKcal'); agg(raw.totalKcal, 'totalKcal');
+    agg(raw.steps, 'steps'); agg(raw.activeKcal, 'activeKcal');
+    // total calories arrive as records: sum them per local day (only days actually covered are overwritten)
+    const tk = {};
+    for (const s of raw.totalKcal || []) if (Number.isFinite(s.value)) { const d = localDate(new Date(s.startDate)); tk[d] = (tk[d] || 0) + s.value; }
+    for (const [d, v] of Object.entries(tk)) day(d).totalKcal = Math.round(v);
+    // hourly heart rate [min, max, avg] and hourly steps, keyed by local hour
+    for (const s of raw.hrHourly || []) {
+      const v = s.values || {}; if (!Number.isFinite(v.max)) continue;
+      const t = new Date(s.startDate), o = day(localDate(t));
+      (o.hrH = o.hrH || {})[t.getHours()] = [Math.round(v.min), Math.round(v.max), Math.round(v.average)];
+    }
+    for (const o of Object.values(H.days)) if (o.hrH) { const hs = Object.values(o.hrH); o.hrMin = Math.min(...hs.map(x => x[0])); o.hrMax = Math.max(...hs.map(x => x[1])); }
+    for (const s of raw.stepsHourly || []) {
+      if (!Number.isFinite(s.value) || !s.value) continue;
+      const t = new Date(s.startDate), o = day(localDate(t));
+      (o.stepsH = o.stepsH || {})[t.getHours()] = Math.round(s.value);
+    }
     const perDay = (arr, key, fn) => {
       const g = {};
       for (const s of arr || []) { const d = localDate(new Date(s.startDate)); (g[d] = g[d] || []).push(s.value); }
@@ -464,6 +484,7 @@
         kcal: w.totalEnergyBurned ? Math.round(w.totalEnergyBurned) : null, km: w.totalDistance ? round1(w.totalDistance / 1000) : null,
         avgHr: w.avgHr || null, maxHr: w.maxHr || null, source: w.sourceName || w.sourceId || '',
       };
+      if (w.hrSeries && w.hrSeries.length) rec.hr = w.hrSeries;
       const i = H.sessions.findIndex(x => x.id === id);
       if (i >= 0) H.sessions[i] = Object.assign(H.sessions[i], rec); else H.sessions.push(rec);
     }
@@ -513,6 +534,21 @@
     if (rhrDelta !== null) { if (rhrDelta >= 7) { score -= 2; why.push(`nhịp tim nghỉ +${rhrDelta}`); } else if (rhrDelta >= 4) { score -= 1; why.push(`nhịp tim nghỉ +${rhrDelta}`); } }
     if (hrvDelta !== null && hrvDelta <= -20) { score -= 1; why.push(`HRV ${hrvDelta}%`); }
     return { level: score <= -2 ? 'low' : score < 0 ? 'mid' : 'good', sleepH, restHr: d.restHr || null, rhrDelta, hrv: d.hrv || null, hrvDelta, why, deepMin: d.sleep ? d.sleep.deepMin : null };
+  }
+
+  // Heart-rate zones as % of max HR (warm-up 50–60, fat burn 60–70, aerobic 70–80, anaerobic 80–90, max 90+).
+  const HR_ZONES = [['Khởi động', 0.5], ['Đốt mỡ', 0.6], ['Aerobic', 0.7], ['Anaerobic', 0.8], ['Tối đa', 0.9]];
+  function maxHrFor(db) { const a = db.profile && db.profile.age; return a ? Math.round(208 - 0.7 * a) : 190; }
+  function zoneOf(bpm, maxHr) { const p = bpm / maxHr; let z = -1; HR_ZONES.forEach(([, lo], i) => { if (p >= lo) z = i; }); return z; }
+  // series: [[sec, bpm]...] -> minutes spent in each zone (index 0..4); time below zone 1 is ignored
+  function zoneMinutes(series, maxHr) {
+    const out = [0, 0, 0, 0, 0];
+    for (let i = 0; i < series.length; i++) {
+      const dt = i + 1 < series.length ? Math.min(120, series[i + 1][0] - series[i][0]) : 30;
+      const z = zoneOf(series[i][1], maxHr);
+      if (z >= 0) out[z] += dt / 60;
+    }
+    return out.map(m => Math.round(m * 10) / 10);
   }
 
   // ---------- nutrition ----------
@@ -585,7 +621,7 @@
     emptyDB, seedDB, mergeSeed, normalizeDB, newWorkout, newItem, isDone, isWork, setReps, e1rm, setVolume, setFilled, describeSet,
     finished, sortedDesc, exerciseHistory, lastPerformance, bests, detectPR, suggestion, workoutStats, durationOf,
     muscleSetsByWeek, e1rmSeries, streakWeeks, CSV_COLS, toCSV, backupJSON, summaryText, parseBackup, importLegacyV4, mergeWorkouts,
-    sleepByNight, ingestHealth, matchSession, fillFromHealth, readiness, median,
+    sleepByNight, ingestHealth, matchSession, fillFromHealth, readiness, median, HR_ZONES, maxHrFor, zoneOf, zoneMinutes,
     GOALS, latestWeight, bmr, tdee, weightTrend, nutritionTargets, intake, DAILY_COLS, toDailyCSV,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
