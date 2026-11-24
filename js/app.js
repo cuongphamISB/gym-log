@@ -308,7 +308,7 @@
 
   // ---------- LIBRARY ----------
   function vLibrary() {
-    let h = `<div class="topbar"><div><div class="eyebrow">${db.exercises.filter(e => e.type !== 'info').length} bài · ${db.templates.length} giáo án</div><h1>Bài & giáo án</h1></div><button class="iconbtn" data-act="open" data-page="settings" aria-label="Cài đặt">${I.gear}</button></div>`;
+    let h = `<div class="topbar"><div><div class="eyebrow">${db.exercises.filter(e => e.type !== 'info').length} bài · ${db.templates.length} giáo án</div><h1>Thư viện</h1></div><button class="iconbtn" data-act="open" data-page="settings" aria-label="Cài đặt">${I.gear}</button></div>`;
     h += `<div class="seg"><button class="${ui.libSeg === 'ex' ? 'on' : ''}" data-act="libseg" data-v="ex">Bài tập</button><button class="${ui.libSeg === 'tpl' ? 'on' : ''}" data-act="libseg" data-v="tpl">Giáo án</button></div>`;
     if (ui.libSeg === 'tpl') {
       h += `<div class="list">` + db.templates.map(t => `<button class="li" data-act="open" data-page="template" data-id="${t.id}"><div class="ph" style="color:var(--acc)">${esc(t.short || t.name.slice(0, 1))}</div><div class="grow"><b>${esc(t.name)}</b><span class="small muted">${t.items.length} bài${t.days && t.days.length ? ' · ' + t.days.map(d => DOW[d]).join(', ') : ''}</span></div><span class="chev">›</span></button>`).join('') + `</div>`;
@@ -514,7 +514,7 @@
       <p class="tiny muted" style="margin-bottom:0">CSV: mỗi hiệp một dòng (ngày, bài, kg, reps, RIR, e1RM, khối lượng…), mở được bằng Excel/Sheets/pandas. JSON: bản sao đầy đủ để khôi phục.</p></div>`;
     h += `<div class="section-t"><h2>Nhập dữ liệu</h2></div><div class="card"><button class="btn wide" data-act="import">Nhập file backup…</button><p class="tiny muted" style="margin-bottom:0">Nhận file backup của app này (thay toàn bộ dữ liệu) hoặc <b>FitnessCoach_v4_backup_*.json</b> từ file HTML cũ (gộp thêm, không trùng lặp).</p>
       <button class="btn ghost wide" style="margin-top:8px" data-act="restoreSnap">Khôi phục bản tự lưu đầu ngày</button></div>`;
-    h += `<div class="section-t"><h2>Bộ nhớ</h2></div><div class="card small"><div class="between"><span>Lưu bền (Chrome không tự xoá)</span><b style="color:${persisted ? 'var(--ok)' : 'var(--pr)'}">${persisted ? 'Đã bật' : persisted === false ? 'Chưa — hãy cài app ra màn hình chính' : 'Không rõ'}</b></div><div class="between" style="margin-top:6px"><span>Dung lượng dùng</span><b id="usage">…</b></div></div>`;
+    h += `<div class="section-t"><h2>Bộ nhớ</h2></div><div class="card small"><div class="between"><span>Lưu bền (không bị hệ thống tự xoá)</span><b style="color:${persisted ? 'var(--ok)' : 'var(--pr)'}">${persisted ? 'Đã bật' : persisted === false ? 'Chưa — hãy cài app ra màn hình chính' : 'Không rõ'}</b></div><div class="between" style="margin-top:6px"><span>Dung lượng dùng</span><b id="usage">…</b></div></div>`;
     h += `<div class="section-t"><h2>Khi tập</h2></div><div class="card" style="padding:4px 16px">
       <div class="switch"><span>Bước tăng tạ gợi ý</span><select class="inp" style="width:auto;min-height:38px" data-setting="kgStep">${[0.5, 1, 2, 2.5, 5].map(v => `<option ${s.kgStep === v ? 'selected' : ''} value="${v}">${v} kg</option>`).join('')}</select></div>
       <div class="switch"><span>Mục tiêu bước/ngày</span><select class="inp" style="width:auto;min-height:38px" data-setting="stepGoal">${[5000, 6000, 7000, 8000, 10000, 12000].map(v => `<option ${(s.stepGoal || 8000) === v ? 'selected' : ''} value="${v}">${v.toLocaleString('vi-VN')}</option>`).join('')}</select></div>
@@ -612,12 +612,12 @@
     const avg = have.reduce((a, n) => a + n.s.h, 0) / have.length;
     const every = range === 'month' ? 5 : 1;
     h += `<div class="card">${bigStat(durTxt(avg * 60), `trung bình ${have.length} đêm · ${have.filter(n => n.s.h >= 7).length} đêm ≥ 7 giờ`)}` +
-      Charts.bars(nights.map((n, i) => ({ label: dayLabel(range, n.d, i), v: n.s ? Math.max(n.s.h, n.s.inBedH || 0) : 0, parts: n.s ? (n.s.deepMin || n.s.lightMin || n.s.remMin ? [[n.s.deepMin / 60, SC.d], [n.s.lightMin / 60, SC.l], [n.s.remMin / 60, SC.r], [n.s.awakeMin / 60, SC.a]] : [[n.s.h, SC.u]]) : null })), { target: 7, color: '#8d95a3', labelEvery: every, title: 'Giờ ngủ' }) +
+      Charts.bars(nights.map((n, i) => ({ d: n.d, label: dayLabel(range, n.d, i), v: n.s ? Math.max(n.s.h, n.s.inBedH || 0) : 0, parts: n.s ? (n.s.deepMin || n.s.lightMin || n.s.remMin ? [[n.s.deepMin / 60, SC.d], [n.s.lightMin / 60, SC.l], [n.s.remMin / 60, SC.r], [n.s.awakeMin / 60, SC.a]] : [[n.s.h, SC.u]]) : null })), { target: 7, color: '#8d95a3', labelEvery: every, title: 'Giờ ngủ' }) +
       legend([[SC.d, 'Sâu'], [SC.l, 'Nông'], [SC.r, 'REM'], [SC.a, 'Thức']]) + `</div>`;
     const bed = have.map(n => new Date(n.s.start)), wake = have.map(n => new Date(n.s.end));
     const avgClock = ds => { const m = ds.map(x => { let v = x.getHours() * 60 + x.getMinutes(); if (v < 12 * 60) v += 1440; return v; }); const a = Math.round(m.reduce((p, c) => p + c, 0) / m.length) % 1440; return `${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`; };
     const avgWake = (() => { const m = wake.map(x => x.getHours() * 60 + x.getMinutes()); const a = Math.round(m.reduce((p, c) => p + c, 0) / m.length); return `${String(Math.floor(a / 60)).padStart(2, '0')}:${String(a % 60).padStart(2, '0')}`; })();
-    h += `<div class="section-t"><h2>Độ đều giờ ngủ</h2><span class="tiny muted">ngủ TB ${avgClock(bed)} · dậy TB ${avgWake}</span></div><div class="card">${Charts.regularity(nights.map((n, i) => ({ label: dayLabel(range, n.d, i), every, start: n.s ? Math.round(new Date(n.s.start) / 60000) : null, end: n.s ? Math.round(new Date(n.s.end) / 60000) : null })))}</div>`;
+    h += `<div class="section-t"><h2>Độ đều giờ ngủ</h2><span class="tiny muted">ngủ TB ${avgClock(bed)} · dậy TB ${avgWake}</span></div><div class="card">${Charts.regularity(nights.map((n, i) => ({ d: n.d, label: dayLabel(range, n.d, i), every, start: n.s ? Math.round(new Date(n.s.start) / 60000) : null, end: n.s ? Math.round(new Date(n.s.end) / 60000) : null })))}</div>`;
     const tot = k => have.reduce((a, n) => a + (n.s[k] || 0), 0);
     const all = tot('deepMin') + tot('lightMin') + tot('remMin');
     if (all) h += `<div class="card small">${[['d', 'deepMin'], ['l', 'lightMin'], ['r', 'remMin']].map(([k, f]) => `<div class="between" style="padding:4px 0"><span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${SC[k]};margin-right:8px"></i>${SN[k]}</span><b class="num">${Math.round(tot(f) / have.length)}′/đêm · ${Math.round(tot(f) / all * 100)}%</b></div>`).join('')}</div>`;
@@ -636,7 +636,7 @@
     }
     const every = range === 'month' ? 5 : 1;
     const rest = days.filter(x => x.o.restHr);
-    h += `<div class="card">${bigStat(rest.length ? Math.round(rest.reduce((a, x) => a + x.o.restHr, 0) / rest.length) + '<small> bpm</small>' : '—', 'nhịp tim nghỉ trung bình')}${Charts.rangeBars(days.map((x, i) => ({ label: dayLabel(range, x.d, i), min: x.o.hrMin, max: x.o.hrMax, avg: x.o.restHr })), { labelEvery: every, title: 'Nhịp tim theo ngày' }) || '<p class="small muted">Chưa có nhịp tim theo ngày.</p>'}${legend([[Charts.C.hr, 'thấp – cao trong ngày'], ['#fff', 'nhịp nghỉ']])}</div>`;
+    h += `<div class="card">${bigStat(rest.length ? Math.round(rest.reduce((a, x) => a + x.o.restHr, 0) / rest.length) + '<small> bpm</small>' : '—', 'nhịp tim nghỉ trung bình')}${Charts.rangeBars(days.map((x, i) => ({ d: x.d, label: dayLabel(range, x.d, i), min: x.o.hrMin, max: x.o.hrMax, avg: x.o.restHr })), { labelEvery: every, title: 'Nhịp tim theo ngày' }) || '<p class="small muted">Chưa có nhịp tim theo ngày.</p>'}${legend([[Charts.C.hr, 'thấp – cao trong ngày'], ['#fff', 'nhịp nghỉ']])}</div>`;
     if (rest.length > 1) h += `<div class="section-t"><h2>Nhịp tim nghỉ</h2><span class="tiny muted">thấp hơn = hồi phục tốt hơn</span></div><div class="card">${lineChart(rest.map(x => ({ x: x.d, y: x.o.restHr })), 'bpm')}</div>`;
     const hrv = days.filter(x => x.o.hrv);
     if (hrv.length > 1) h += `<div class="section-t"><h2>HRV</h2><span class="tiny muted">cao hơn = hồi phục tốt hơn</span></div><div class="card">${lineChart(hrv.map(x => ({ x: x.d, y: x.o.hrv })), 'ms')}</div>`;
@@ -654,9 +654,9 @@
     }
     const every = range === 'month' ? 5 : 1;
     const st = days.filter(x => x.o.steps);
-    h += `<div class="card">${bigStat(st.length ? Math.round(st.reduce((a, x) => a + x.o.steps, 0) / st.length).toLocaleString('vi-VN') + '<small> bước/ngày</small>' : '—', `${st.filter(x => x.o.steps >= goal).length}/${st.length} ngày đạt ${goal.toLocaleString('vi-VN')}`)}${Charts.bars(days.map((x, i) => ({ label: dayLabel(range, x.d, i), v: x.o.steps || 0 })), { color: Charts.C.steps, hitColor: '#36d16f', target: goal, labelEvery: every, title: 'Bước chân' })}</div>`;
+    h += `<div class="card">${bigStat(st.length ? Math.round(st.reduce((a, x) => a + x.o.steps, 0) / st.length).toLocaleString('vi-VN') + '<small> bước/ngày</small>' : '—', `${st.filter(x => x.o.steps >= goal).length}/${st.length} ngày đạt ${goal.toLocaleString('vi-VN')}`)}${Charts.bars(days.map((x, i) => ({ d: x.d, label: dayLabel(range, x.d, i), v: x.o.steps || 0 })), { color: Charts.C.steps, hitColor: '#36d16f', target: goal, labelEvery: every, title: 'Bước chân' })}</div>`;
     const kc = days.filter(x => x.o.activeKcal);
-    if (kc.length) h += `<div class="section-t"><h2>Calo vận động</h2><span class="tiny muted">TB ${Math.round(kc.reduce((a, x) => a + x.o.activeKcal, 0) / kc.length)} kcal/ngày</span></div><div class="card">${Charts.bars(days.map((x, i) => ({ label: dayLabel(range, x.d, i), v: x.o.activeKcal || 0 })), { color: Charts.C.kcal, labelEvery: every, title: 'Calo vận động' })}</div>`;
+    if (kc.length) h += `<div class="section-t"><h2>Calo vận động</h2><span class="tiny muted">TB ${Math.round(kc.reduce((a, x) => a + x.o.activeKcal, 0) / kc.length)} kcal/ngày</span></div><div class="card">${Charts.bars(days.map((x, i) => ({ d: x.d, label: dayLabel(range, x.d, i), v: x.o.activeKcal || 0 })), { color: Charts.C.kcal, labelEvery: every, title: 'Calo vận động' })}</div>`;
     return h;
   }
 
@@ -933,6 +933,7 @@
     },
     hMetric: b => { if (top() && top().type === 'health') replaceTop({ type: 'health', id: b.dataset.v }); else { ui.hMetric = b.dataset.v; render(); } },
     hRange: b => { ui.hRange = b.dataset.v; render(); },
+    hDay: b => { if (!b.dataset.d || b.dataset.d > L.localDate()) return; ui.hRange = 'day'; ui.hDate = b.dataset.d; render(); window.scrollTo(0, 0); },
     hNav: b => {
       const r = ui.hRange || 'day', a = ui.hDate || L.localDate(), d = +b.dataset.d;
       let n = r === 'day' ? L.addDays(a, d) : r === 'week' ? L.addDays(a, 7 * d) : (() => { const x = L.parseDate(a); return L.localDate(new Date(x.getFullYear(), x.getMonth() + d, 1)); })();
@@ -1089,6 +1090,24 @@
   window.addEventListener('store-error', () => toast('⚠️ Không lưu được vào bộ nhớ máy — hãy sao lưu JSON ngay!'));
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (ui.tab === 'today' && !top()) render(); });
   window.addEventListener('appinstalled', () => { installEvt = null; Store.persist().then(p => { persisted = p; }); render(); });
+
+  // Health tab: horizontal swipe = previous / next day-week-month
+  (function () {
+    let x0 = null, y0 = 0, t0 = 0;
+    document.addEventListener('touchstart', e => {
+      const inHealth = (ui.tab === 'health' && !ui.stack.length) || (top() && top().type === 'health');
+      if (!inHealth || e.touches.length !== 1 || e.target.closest('.chips,.seg,input,select,textarea')) { x0 = null; return; }
+      x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now();
+    }, { passive: true });
+    document.addEventListener('touchend', e => {
+      if (x0 === null) return;
+      const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+      x0 = null;
+      if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || Date.now() - t0 > 600) return;
+      const btn = document.querySelector(`[data-act="hNav"][data-d="${dx < 0 ? 1 : -1}"]`);
+      if (btn && !btn.disabled) ACT.hNav(btn);
+    }, { passive: true });
+  })();
 
   // Android back button / back gesture: close the open page, then return to Today, then minimise (never kill the app mid-workout)
   function handleBack() {

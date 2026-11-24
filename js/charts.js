@@ -61,6 +61,7 @@
         body += `<rect x="${fx(x)}" y="${fx(Y(it.v))}" width="${fx(bw)}" height="${fx(Math.max(1, h))}" rx="${fx(Math.min(4, bw / 2))}" fill="${opts.target && it.v >= opts.target ? opts.hitColor || opts.color : opts.color}" opacity="${it.hi ? 1 : 0.88}"/>`;
       }
       if (it.label && (i % (opts.labelEvery || 1) === 0)) body += txt(x + bw / 2, H - 6, it.label, 'middle');
+      if (it.d) body += `<rect x="${fx(L + slot * i)}" y="0" width="${fx(slot)}" height="${H}" fill="transparent" data-act="hDay" data-d="${it.d}"/>`;
     });
     return svg(W, H, body, opts.title);
   }
@@ -84,6 +85,7 @@
         if (it.avg) body += `<circle cx="${fx(x)}" cy="${fx(Y(it.avg))}" r="${fx(Math.max(1.6, bw / 2.4))}" fill="#fff"/>`;
       }
       if (it && it.label && i % (opts.labelEvery || 1) === 0) body += txt(x, H - 6, it.label, 'middle');
+      if (it && it.d) body += `<rect x="${fx(L + slot * i)}" y="0" width="${fx(slot)}" height="${H}" fill="transparent" data-act="hDay" data-d="${it.d}"/>`;
     });
     return svg(W, H, body, opts.title);
   }
@@ -106,6 +108,7 @@
       const x = L + slot * i + slot / 2;
       if (nt && nt.start) { const a = rel(nt.start), b = rel(nt.end); body += `<rect x="${fx(x - bw / 2)}" y="${fx(Y(a))}" width="${fx(bw)}" height="${fx(Math.max(2, Y(b) - Y(a)))}" rx="${fx(bw / 2)}" fill="${C.sleep.l}" opacity=".85"/>`; }
       if (nt && nt.label && i % (nt.every || 1) === 0) body += txt(x, H - 6, nt.label, 'middle');
+      if (nt && nt.d) body += `<rect x="${fx(L + slot * i)}" y="0" width="${fx(slot)}" height="${H}" fill="transparent" data-act="hDay" data-d="${nt.d}"/>`;
     });
     return svg(W, H, body, 'Giờ ngủ – giờ dậy');
   }
