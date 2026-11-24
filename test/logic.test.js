@@ -257,3 +257,35 @@ test('sleepByNight keeps naps out of the night and joins split nights', () => {
   assert.equal(n[d].end, '2026-11-23T02:04:00Z');
   assert.equal(Math.round(n[d].asleepMin), 356 + 84);
 });
+
+test('ingestMiCloud: sleep with stages+score, resting HR, hourly HR, steps, watch workouts', () => {
+  const db = L.normalizeDB(L.seedDB(SEED));
+  const bed = 1795458900, wake = 1795483500; // 2026-11-24 local night
+  const data = {
+    sleepDaily: [{ time: 1795478400, value: JSON.stringify({ sleep_score: 87, avg_spo2: 96, segment_details: [
+      { bedtime: bed, wake_up_time: wake, duration: 410, sleep_deep_duration: 154, sleep_light_duration: 153, sleep_rem_duration: 103, sleep_awake_duration: 0, avg_hr: 52, min_hr: 45, awake_count: 0 },
+      { bedtime: 1795512000, wake_up_time: 1795513500, duration: 25 }] }) }],
+    sleepRaw: [{ value: JSON.stringify({ bedtime: bed, avg_breath: 17, items: [{ start_time: bed, end_time: bed + 1200, state: 3 }, { start_time: bed + 1200, end_time: bed + 4000, state: 2 }, { start_time: bed + 4000, end_time: bed + 4300, state: 4 }] }) }],
+    hrDaily: [{ time: 1795478400, value: JSON.stringify({ avg_hr: 57, avg_rhr: 69, min_hr: 45, max_hr: 102, fat_burning_hr_zone_duration: 600 }) }],
+    restRaw: [{ value: JSON.stringify({ bpm: 59, date_time: 1795392000 }) }],
+    hrRaw: [{ value: JSON.stringify({ time: 1795500000, bpm: 90 }) }, { value: JSON.stringify({ time: 1795500060, bpm: 110 }) }, { value: JSON.stringify({ time: 1795500120, bpm: 130 }) }],
+    stepsDaily: [{ time: 1795478400, value: JSON.stringify({ steps: 3970, calories: 117, distance: 2543 }) }],
+    sports: [{ sid: 'x', value: JSON.stringify({ start_time: 1795499990, end_time: 1795500200, duration: 210, calories: 30, avg_hrm: 110, max_hrm: 130, hrm_fat_burning_duration: 120, hrm_aerobic_duration: 60, train_effect: 2.1, train_load: 15, recover_time: 6, sport_type: 320 }) }],
+  };
+  // a Health Connect copy of the same workout must be replaced
+  db.health.sessions.push({ id: 'hc1', start: new Date(1795499990000).toISOString(), end: new Date(1795500200000).toISOString(), avgHr: 1 });
+  const r = L.ingestMiCloud(db, data);
+  assert.equal(r.nights, 1); assert.equal(r.sessions, 1);
+  const d = db.health.days['2026-11-24'];
+  assert.equal(d.sleep.h, 6.8); assert.equal(d.sleep.score, 87); assert.equal(d.sleep.napMin, 25); assert.equal(d.sleep.breath, 17);
+  assert.deepEqual(d.sleep.seg.map(s => s[2]), ['l', 'd', 'r']);
+  assert.equal(d.restHr, 69); assert.equal(d.restHrEst, false); assert.deepEqual(d.hrZonesMin, [0, 10, 0, 0, 0]);
+  assert.equal(d.steps, 3970); assert.equal(d.activeKcal, 117); assert.equal(d.distanceKm, 2.5);
+  assert.equal(db.health.days['2026-11-23'].restHr, 59);
+  assert.equal(db.health.sessions.length, 1);
+  const s = db.health.sessions[0];
+  assert.equal(s.src, 'mi'); assert.deepEqual(s.zonesMin, [0, 2, 1, 0, 0]); assert.equal(s.trainEffect, 2.1);
+  assert.deepEqual(s.hr.map(p => p[1]), [90, 110, 130]);
+  // idempotent
+  L.ingestMiCloud(db, data); assert.equal(db.health.sessions.length, 1);
+});

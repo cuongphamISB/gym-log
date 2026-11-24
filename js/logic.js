@@ -460,9 +460,10 @@
     const day = d => H.days[d] || (H.days[d] = {});
     const nights = sleepByNight(raw.sleep);
     for (const [d, n] of Object.entries(nights)) {
+      if (day(d).sleep && day(d).sleep.src === 'mi') continue;
       day(d).sleep = { h: round1(n.asleepMin / 60), inBedH: round1(n.inBedMin / 60), deepMin: Math.round(n.deepMin), remMin: Math.round(n.remMin), lightMin: Math.round(n.lightMin), awakeMin: Math.round(n.awakeMin), start: n.start, end: n.end, seg: n.seg.sort((a, b) => a[0] - b[0]), napMin: n.napMin || 0, naps: n.naps || [] };
     }
-    const agg = (arr, key) => { for (const s of arr || []) { const v = s.value; if (v === null || v === undefined || !Number.isFinite(v)) continue; day(localDate(new Date(s.startDate)))[key] = Math.round(v); } };
+    const agg = (arr, key) => { for (const s of arr || []) { const v = s.value; if (v === null || v === undefined || !Number.isFinite(v)) continue; const o = day(localDate(new Date(s.startDate))); if (o.actSrc === 'mi') continue; o[key] = Math.round(v); } };
     agg(raw.steps, 'steps'); agg(raw.activeKcal, 'activeKcal');
     // total calories arrive as records: sum them per local day (only days actually covered are overwritten)
     const tk = {};
@@ -472,6 +473,7 @@
     for (const s of raw.hrHourly || []) {
       const v = s.values || {}; if (!Number.isFinite(v.max)) continue;
       const t = new Date(s.startDate), o = day(localDate(t));
+      if (o.hrSrc === 'mi') continue;
       (o.hrH = o.hrH || {})[t.getHours()] = [Math.round(v.min), Math.round(v.max), Math.round(v.average)];
     }
     for (const o of Object.values(H.days)) if (o.hrH) {
@@ -488,7 +490,8 @@
       for (const s of arr || []) { const d = localDate(new Date(s.startDate)); (g[d] = g[d] || []).push(s.value); }
       for (const [d, vs] of Object.entries(g)) day(d)[key] = fn(vs);
     };
-    perDay(raw.restHr, 'restHr', vs => Math.round(Math.min(...vs)));
+    perDay(raw.restHr, 'restHrHc', vs => Math.round(Math.min(...vs)));
+    for (const o of Object.values(H.days)) if (o.restHrHc && o.restSrc !== 'mi') o.restHr = o.restHrHc;
     perDay(raw.hrv, 'hrv', vs => Math.round(vs.reduce((a, b) => a + b, 0) / vs.length));
     for (const s of raw.weight || []) {
       const d = localDate(new Date(s.startDate)), kg = round1(s.value);
@@ -552,7 +555,105 @@
     if (sleepH !== null) { if (sleepH < 6) { score -= 2; why.push(`ngủ ${sleepH}h`); } else if (sleepH < 7) { score -= 1; why.push(`ngủ ${sleepH}h`); } else why.push(`ngủ ${sleepH}h`); }
     if (rhrDelta !== null) { if (rhrDelta >= 7) { score -= 2; why.push(`nhịp tim nghỉ +${rhrDelta}`); } else if (rhrDelta >= 4) { score -= 1; why.push(`nhịp tim nghỉ +${rhrDelta}`); } }
     if (hrvDelta !== null && hrvDelta <= -20) { score -= 1; why.push(`HRV ${hrvDelta}%`); }
-    return { level: score <= -2 ? 'low' : score < 0 ? 'mid' : 'good', sleepH, restHr: d.restHr || null, rhrDelta, hrv: d.hrv || null, hrvDelta, why, deepMin: d.sleep ? d.sleep.deepMin : null };
+    const sScore = d.sleep && d.sleep.score;
+    if (sScore) { if (sScore < 60) { score -= 1; why.push(`điểm ngủ ${sScore}`); } else why.push(`điểm ngủ ${sScore}`); }
+    return { level: score <= -2 ? 'low' : score < 0 ? 'mid' : 'good', sleepScore: sScore || null, sleepH, restHr: d.restHr || null, rhrDelta, hrv: d.hrv || null, hrvDelta, why, deepMin: d.sleep ? d.sleep.deepMin : null };
+  }
+
+  // ---------- Mi Fitness cloud (Xiaomi account) ----------
+  // Daily report rows: `time` is UTC midnight of the local date, `value` a JSON string.
+  const miDay = t => new Date(t * 1000).toISOString().slice(0, 10);
+  const miJson = v => { if (v && typeof v === 'object') return v; try { return JSON.parse(v || '{}'); } catch (e) { return {}; } };
+  const ISO = s => new Date(s * 1000).toISOString();
+  const MI_STAGE = { 2: 'd', 3: 'l', 4: 'r', 5: 'a' };
+  // data = { sleepDaily, sleepRaw, hrDaily, hrRaw, restRaw, stepsDaily, sports } as served by the cloud
+  function ingestMiCloud(db, data, nowIso = new Date().toISOString()) {
+    const H = db.health || (db.health = { days: {}, sessions: [], lastSync: null });
+    const day = d => H.days[d] || (H.days[d] = {});
+    const live = rows => (rows || []).filter(r => r && !r.deleted);
+    // raw sleep sessions carry the stage timeline; index them by bedtime
+    const stagesByBed = {};
+    for (const r of live(data.sleepRaw)) {
+      const v = miJson(r.value);
+      if (v.bedtime && Array.isArray(v.items) && v.items.length && !stagesByBed[v.bedtime]) stagesByBed[v.bedtime] = { items: v.items, breath: v.avg_breath || null };
+    }
+    let nights = 0;
+    for (const r of live(data.sleepDaily)) {
+      const v = miJson(r.value), segs = (v.segment_details || []).filter(s => s.bedtime && s.wake_up_time);
+      if (!segs.length) continue;
+      const main = segs.reduce((a, b) => (b.duration || 0) > (a.duration || 0) ? b : a);
+      const naps = segs.filter(s => s !== main);
+      const st = stagesByBed[main.bedtime];
+      const seg = st ? st.items.map(i => [Math.round(i.start_time / 60), Math.round(i.end_time / 60), MI_STAGE[i.state] || 'u']) : [[Math.round(main.bedtime / 60), Math.round(main.wake_up_time / 60), 'u']];
+      day(miDay(r.time)).sleep = {
+        h: round1((main.duration || 0) / 60), inBedH: round1((main.wake_up_time - main.bedtime) / 3600),
+        deepMin: main.sleep_deep_duration || 0, lightMin: main.sleep_light_duration || 0, remMin: main.sleep_rem_duration || 0, awakeMin: main.sleep_awake_duration || 0,
+        start: ISO(main.bedtime), end: ISO(main.wake_up_time), seg,
+        napMin: naps.reduce((a, s) => a + (s.duration || 0), 0), naps: naps.map(s => [Math.round(s.bedtime / 60), Math.round(s.wake_up_time / 60)]),
+        score: v.sleep_score || null, avgHr: main.avg_hr || null, minHr: main.min_hr || null, spo2: v.avg_spo2 || null, breath: st ? st.breath : null, awakeCount: main.awake_count ?? null, src: 'mi',
+      };
+      nights++;
+    }
+    for (const r of live(data.hrDaily)) {
+      const v = miJson(r.value), o = day(miDay(r.time));
+      if (v.avg_rhr) { o.restHr = v.avg_rhr; o.restHrEst = false; o.restSrc = 'mi'; }
+      if (v.min_hr) o.hrMin = v.min_hr;
+      if (v.max_hr) o.hrMax = v.max_hr;
+      if (v.avg_hr) o.hrAvg = v.avg_hr;
+      const z = [v.warm_up_hr_zone_duration, v.fat_burning_hr_zone_duration, v.aerobic_hr_zone_duration, v.anaerobic_hr_zone_duration, v.extreme_hr_zone_duration];
+      if (z.some(x => x)) o.hrZonesMin = z.map(x => Math.round((x || 0) / 60));
+    }
+    for (const r of live(data.restRaw)) { const v = miJson(r.value); if (v.bpm && v.date_time) { const o = day(miDay(v.date_time)); if (!o.restHr || o.restSrc !== 'mi') { o.restHr = v.bpm; o.restHrEst = false; o.restSrc = 'mi'; } } }
+    // raw HR (per minute) -> hourly [min, max, avg] in local time
+    const hours = {};
+    const hrPts = [];
+    for (const r of live(data.hrRaw)) {
+      const v = miJson(r.value); if (!v.bpm || !v.time) continue;
+      hrPts.push([v.time, v.bpm]);
+      const t = new Date(v.time * 1000), k = localDate(t) + '|' + t.getHours();
+      (hours[k] = hours[k] || []).push(v.bpm);
+    }
+    for (const [k, vs] of Object.entries(hours)) {
+      const [d, hr] = k.split('|'), o = day(d);
+      if (o.hrSrc !== 'mi') { o.hrH = {}; o.hrSrc = 'mi'; }
+      o.hrH[hr] = [Math.min(...vs), Math.max(...vs), Math.round(vs.reduce((a, b) => a + b, 0) / vs.length)];
+    }
+    for (const o of Object.values(H.days)) if (o.hrH && !o.hrMin) { const hs = Object.values(o.hrH); o.hrMin = Math.min(...hs.map(x => x[0])); o.hrMax = Math.max(...hs.map(x => x[1])); }
+    for (const r of live(data.stepsDaily)) {
+      const v = miJson(r.value), o = day(miDay(r.time));
+      o.actSrc = 'mi';
+      if (v.steps !== undefined) o.steps = v.steps;
+      if (v.calories !== undefined) o.activeKcal = v.calories;
+      if (v.distance !== undefined) o.distanceKm = round1(v.distance / 1000);
+    }
+    // workouts recorded on the watch
+    hrPts.sort((a, b) => a[0] - b[0]);
+    let sessions = 0;
+    for (const r of live(data.sports)) {
+      const v = miJson(r.value); if (!v.start_time || !v.end_time) continue;
+      const id = 'mi-' + (r.sid || '') + '-' + v.start_time;
+      const rec = {
+        id, src: 'mi', type: 'mi:' + v.sport_type, sportType: v.sport_type, start: ISO(v.start_time), end: ISO(v.end_time),
+        durationMin: Math.round((v.duration || (v.end_time - v.start_time)) / 60), kcal: v.calories || v.total_cal || null,
+        avgHr: v.avg_hrm || null, maxHr: v.max_hrm || null, minHr: v.min_hrm || null,
+        zonesMin: [v.hrm_warm_up_duration, v.hrm_fat_burning_duration, v.hrm_aerobic_duration, v.hrm_anaerobic_duration, v.hrm_extreme_duration].map(x => round1((x || 0) / 60)),
+        trainEffect: v.train_effect ?? null, anaerobicEffect: v.anaerobic_train_effect ?? null, trainLoad: v.train_load ?? null, recoverH: v.recover_time ?? null, source: 'Mi Fitness',
+      };
+      const series = hrPts.filter(p => p[0] >= v.start_time && p[0] <= v.end_time).map(p => [p[0] - v.start_time, p[1]]);
+      const old = H.sessions.find(x => x.id === id);
+      if (series.length > 1) rec.hr = series; else if (old && old.hr) rec.hr = old.hr;
+      // drop a Health Connect copy of the same workout
+      const a0 = v.start_time * 1000, a1 = v.end_time * 1000;
+      H.sessions = H.sessions.filter(x => x.id === id || x.src === 'mi' || Math.min(a1, +new Date(x.end)) - Math.max(a0, +new Date(x.start)) < 0.5 * (a1 - a0) || (rec.hr || (rec.hr = x.hr), false));
+      const i = H.sessions.findIndex(x => x.id === id);
+      if (i >= 0) H.sessions[i] = Object.assign(H.sessions[i], rec); else H.sessions.push(rec);
+      sessions++;
+    }
+    H.sessions.sort((a, b) => a.start.localeCompare(b.start));
+    let matched = 0;
+    for (const w of finished(db)) if (fillFromHealth(db, w)) matched++;
+    H.miSync = nowIso;
+    return { nights, sessions, matched, hrPoints: hrPts.length };
   }
 
   // Heart-rate zones as % of max HR (warm-up 50–60, fat burn 60–70, aerobic 70–80, anaerobic 80–90, max 90+).
@@ -640,7 +741,7 @@
     emptyDB, seedDB, mergeSeed, normalizeDB, newWorkout, newItem, isDone, isWork, setReps, e1rm, setVolume, setFilled, describeSet,
     finished, sortedDesc, exerciseHistory, lastPerformance, bests, detectPR, suggestion, workoutStats, durationOf,
     muscleSetsByWeek, e1rmSeries, streakWeeks, CSV_COLS, toCSV, backupJSON, summaryText, parseBackup, importLegacyV4, mergeWorkouts,
-    sleepByNight, ingestHealth, matchSession, fillFromHealth, readiness, median, HR_ZONES, maxHrFor, zoneOf, zoneMinutes,
+    sleepByNight, ingestHealth, ingestMiCloud, matchSession, fillFromHealth, readiness, median, HR_ZONES, maxHrFor, zoneOf, zoneMinutes,
     GOALS, latestWeight, bmr, tdee, weightTrend, nutritionTargets, intake, DAILY_COLS, toDailyCSV,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

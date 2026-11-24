@@ -47,10 +47,12 @@ Chỉ dùng templateId/exerciseId có trong danh sách. "add" = thêm bài có s
     const rows = [];
     for (let i = 13; i >= 0; i--) {
       const d = L.addDays(L.localDate(), -i), h = hdays[d] || {}, it = L.intake(db, d);
-      const cells = [h.sleep && `ngủ ${h.sleep.h}h (sâu ${h.sleep.deepMin}′)`, h.restHr && `HR nghỉ ${h.restHr}`, h.hrv && `HRV ${h.hrv}`, h.steps && `${h.steps} bước`, h.totalKcal ? `tiêu hao ${h.totalKcal}` : h.activeKcal && `vận động ${h.activeKcal} kcal`, it.entries.length && `ăn ${it.kcal} kcal/${it.protein}g P`].filter(Boolean);
+      const cells = [h.sleep && `ngủ ${h.sleep.h}h (sâu ${h.sleep.deepMin}′${h.sleep.score ? ', điểm ' + h.sleep.score : ''})`, h.restHr && `HR nghỉ ${h.restHr}`, h.hrv && `HRV ${h.hrv}`, h.steps && `${h.steps} bước`, h.totalKcal ? `tiêu hao ${h.totalKcal}` : h.activeKcal && `vận động ${h.activeKcal} kcal`, it.entries.length && `ăn ${it.kcal} kcal/${it.protein}g P`].filter(Boolean);
       if (cells.length) rows.push(`${d}: ${cells.join(', ')}`);
     }
     if (rows.length) out += `\n# NGỦ / HỒI PHỤC / ĂN UỐNG (14 ngày, từ đồng hồ + nhật ký ăn)\n${rows.join('\n')}\n`;
+    const ws = ((db.health && db.health.sessions) || []).filter(x => x.start >= new Date(Date.now() - 28 * 864e5).toISOString());
+    if (ws.length) out += `\n# BUỔI TẬP ĐỒNG HỒ GHI (28 ngày)\n${ws.map(x => `${x.start.slice(0, 10)}: ${x.durationMin}′, HR TB ${x.avgHr || '?'}/max ${x.maxHr || '?'}${x.trainEffect != null ? ', TE ' + x.trainEffect : ''}${x.trainLoad != null ? ', tải ' + x.trainLoad : ''}`).join('\n')}\n`;
     out += '\n# NHẬT KÝ\n' + L.summaryText(db, days);
     return out;
   }

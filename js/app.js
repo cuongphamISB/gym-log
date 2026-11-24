@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const L = self.L, Store = self.Store, Coach = self.Coach, SEED = self.SEED;
-  const VERSION = '1.4.0';
+  const VERSION = '1.5.0';
 
   // ---------- helpers ----------
   const $ = s => document.querySelector(s);
@@ -40,7 +40,8 @@
   };
 
   // ---------- state ----------
-  let db = null, aiKey = '', persisted = null, installEvt = null;
+  let db = null, aiKey = '', persisted = null, installEvt = null, miSession = null;
+  const miOn = () => !!(miSession && window.MiSync && MiSync.capacitorHttp());
   const ui = { tab: 'today', stack: [], sleep: null, libSeg: 'ex', libQ: '', pickQ: '', progEx: null, coachBusy: false, coachResult: null };
   let rest = null; // {endAt,total,label,alerted}
   let wakeLock = null, audioCtx = null;
@@ -125,7 +126,7 @@
       h += `<div class="section-t"><h2>Hồi phục</h2><button data-act="open" data-page="health" data-id="sleep" data-range="day">Chi tiết ›</button></div><div class="card"><div class="between"><b style="color:${col};font-size:18px">${{ good: 'Tốt', mid: 'Trung bình', low: 'Thấp' }[rd.level]}</b><span class="small muted">${esc(rd.why.join(' · '))}</span></div>
         <div class="grid3" style="margin-top:10px">${[['Ngủ', rd.sleepH !== null ? rd.sleepH + 'h' : '—'], ['Ngủ sâu', rd.deepMin ? rd.deepMin + '′' : '—'], ['Nhịp nghỉ', rd.restHr ? rd.restHr + (rd.rhrDelta !== null ? ` (${rd.rhrDelta >= 0 ? '+' : ''}${rd.rhrDelta})` : '') : '—']].map(([k, v]) => `<div><div class="tiny muted">${k}</div><b class="num">${v}</b></div>`).join('')}</div>
         <p class="small" style="margin:10px 0 0;color:${col}">${SLEEP[rd.level][2]}</p></div>`;
-    } else if (window.HealthSync && HealthSync.isNative() && db.settings.hcConnected) {
+    } else if (window.HealthSync && HealthSync.isNative() && (db.settings.hcConnected || miSession)) {
       const lr = db.health && db.health.lastResult;
       h += `<div class="section-t"><h2>Hồi phục</h2></div><div class="card"><div class="between"><span class="small"><b>Chưa có giấc ngủ đêm qua</b><br><span class="muted">${lr && lr.latestSleepEnd ? 'Gần nhất trong Health Connect: ' + new Date(lr.latestSleepEnd).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : 'Health Connect chưa có dữ liệu ngủ'}</span></span></div><div class="grid2" style="margin-top:10px"><button class="btn sm pri" data-act="openMiFit">Mở Mi Fitness</button><button class="btn sm" data-act="hcSync" ${ui.hcBusy ? 'disabled' : ''}>${ui.hcBusy ? '<span class="spinner"></span>' : 'Đồng bộ lại'}</button></div><p class="tiny muted" style="margin:8px 0 0">Mi Fitness chỉ gửi dữ liệu sang Health Connect khi được mở. Bấm "Mở Mi Fitness", đợi nó tải xong rồi vuốt Back — app tự đồng bộ.</p></div>`;
     } else {
@@ -427,6 +428,7 @@
     h += `<div class="stats" style="grid-template-columns:repeat(${Math.min(4, meta.length || 1)},1fr);margin-bottom:12px">${meta.map(m => `<div class="stat"><div class="v num" style="font-size:20px">${esc(m[0])}</div><div class="k">${m[1]}</div></div>`).join('')}</div>`;
     if (w.notes) h += `<div class="card small">${esc(w.notes)}</div>`;
     const ses = w.hcSessionId && db.health && (db.health.sessions || []).find(x => x.id === w.hcSessionId);
+    if (ses) h += watchSummary(ses);
     if (ses && ses.hr && ses.hr.length > 1) {
       const mx = L.maxHrFor(db), zm = L.zoneMinutes(ses.hr, mx), zt = zm.reduce((a, c) => a + c, 0) || 1;
       h += `<div class="card"><div class="between"><b>Nhịp tim (đồng hồ)</b><span class="small muted">TB ${ses.avgHr || '—'} · max ${ses.maxHr || '—'} · ${ses.kcal || '—'} kcal</span></div>${Charts.hrZoneCurve(ses.hr, mx, L.HR_ZONES)}` +
@@ -521,6 +523,22 @@
       <label class="switch"><span>Tự bật đồng hồ nghỉ khi tick hiệp</span><input type="checkbox" data-setting="autoRest" ${s.autoRest ? 'checked' : ''}></label>
       <label class="switch"><span>Âm báo hết giờ nghỉ</span><input type="checkbox" data-setting="sound" ${s.sound ? 'checked' : ''}></label>
       <label class="switch"><span>Rung khi hết giờ nghỉ</span><input type="checkbox" data-setting="vibrate" ${s.vibrate ? 'checked' : ''}></label></div>`;
+    h += `<div class="section-t"><h2>Tài khoản Xiaomi (Mi Fitness)</h2></div><div class="card small">`;
+    if (window.HealthSync && HealthSync.isNative()) {
+      if (miSession) {
+        const ml = db.health && db.health.miLast;
+        h += `<div class="between"><span>Trạng thái</span><b style="color:var(--ok)">Đã đăng nhập · ${esc(miSession.region)}</b></div>
+          <div class="between" style="margin-top:6px"><span>Đồng bộ cuối</span><b>${ml ? new Date(ml.at).toLocaleString('vi-VN') : '—'}</b></div>
+          ${ml ? `<div class="between" style="margin-top:6px"><span>Lần cuối nhận</span><b>${ml.nights} đêm · ${ml.sessions} buổi · ${ml.hr} mẫu HR</b></div>` : ''}
+          ${ui.miErrors ? `<p class="tiny" style="color:var(--pr)">Lỗi: ${esc(Object.entries(ui.miErrors).map(([k, v]) => k + ': ' + v).join('; '))}</p>` : ''}
+          <div class="grid2" style="margin-top:12px"><button class="btn pri" data-act="miSyncNow" ${ui.miBusy ? 'disabled' : ''}>${ui.miBusy ? '<span class="spinner"></span>' : 'Đồng bộ ngay'}</button><button class="btn danger" data-act="miLogout">Đăng xuất</button></div>`;
+      } else {
+        h += `<p style="margin-top:0">Lấy dữ liệu đầy đủ thẳng từ tài khoản Xiaomi: <b>điểm giấc ngủ, nhịp tim nghỉ, nhịp tim cả ngày, buổi tập đồng hồ (vùng tim, hiệu quả tập, tải)</b> — đủ hơn Health Connect.</p>
+          <div class="grid2"><button class="btn pri" data-act="miLogin">Đăng nhập bằng QR</button><button class="btn" data-act="miImport">Nhập phiên (.json)</button></div>`;
+      }
+      h += `<p class="tiny muted" style="margin-bottom:0">Đăng nhập không cần mật khẩu: bạn tự xác nhận bằng Máy quét Xiaomi. Phiên chỉ lưu trên máy này (không nằm trong file sao lưu), tự gia hạn. Thu hồi trong mục thiết bị đã đăng nhập của tài khoản Xiaomi.</p>`;
+    } else h += `<p style="margin:0" class="muted">Chỉ có trong bản Android.</p>`;
+    h += `</div>`;
     h += `<div class="section-t"><h2>Đồng hồ · Health Connect</h2></div><div class="card small">`;
     if (window.HealthSync && HealthSync.isNative()) {
       const H = db.health || {};
@@ -544,6 +562,18 @@
     return h;
   };
 
+  // watch workout figures (Mi cloud): effect, load, recovery, zones when there is no HR curve
+  function watchSummary(ses) {
+    const bits = [ses.trainEffect != null && ['Hiệu quả aerobic', ses.trainEffect], ses.anaerobicEffect != null && ['Hiệu quả anaerobic', ses.anaerobicEffect], ses.trainLoad != null && ['Tải luyện tập', ses.trainLoad], ses.recoverH != null && ['Hồi phục', ses.recoverH + ' giờ']].filter(Boolean);
+    let h = '';
+    if (bits.length) h += `<div class="card"><div class="between" style="margin-bottom:8px"><b>Đồng hồ ghi nhận</b><span class="small muted">TB ${ses.avgHr || '—'} · max ${ses.maxHr || '—'} · ${ses.kcal || '—'} kcal</span></div><div class="grid2">${bits.map(([k, v]) => `<div><div class="tiny muted">${k}</div><b class="num">${v}</b></div>`).join('')}</div></div>`;
+    if (ses.zonesMin && !(ses.hr && ses.hr.length > 1)) {
+      const zt = ses.zonesMin.reduce((a, c) => a + c, 0) || 1, mx = L.maxHrFor(db);
+      h += `<div class="card"><b>Thời gian theo vùng nhịp tim</b>` + L.HR_ZONES.map(([n], i) => `<div class="mbar" style="grid-template-columns:110px 1fr 44px"><span class="small"><i style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${Charts.C.zones[i]};margin-right:6px"></i>${n}</span><div class="track"><div class="fill" style="width:${ses.zonesMin[i] / zt * 100}%;background:${Charts.C.zones[i]}"></div></div><b class="num small" style="text-align:right">${Math.round(ses.zonesMin[i])}′</b></div>`).join('') + `</div>`;
+    }
+    return h;
+  }
+
   // ---------- health detail (sleep / heart rate / activity × day / week / month) ----------
   const durTxt = m => m >= 60 ? `${Math.floor(m / 60)}<small> giờ </small>${Math.round(m % 60)}<small> phút</small>` : `${Math.round(m)}<small> phút</small>`;
   function healthRange(range, anchor) {
@@ -562,7 +592,7 @@
   function bigStat(value, sub) { return `<div style="margin:6px 2px 10px"><div style="font-size:30px;font-weight:850;letter-spacing:-.8px" class="num">${value}</div>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`; }
   function legend(items) { return `<div class="row wrap" style="gap:12px;margin-top:6px">${items.map(([c, l]) => `<span class="tiny muted"><i style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${c};margin-right:5px"></i>${l}</span>`).join('')}</div>`; }
 
-  const syncedTxt = () => db.health && db.health.lastSync ? 'Đồng bộ ' + new Date(db.health.lastSync).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : 'Dữ liệu từ Health Connect';
+  const syncedTxt = () => { const H = db.health || {}; const t = [H.lastSync, H.miSync].filter(Boolean).sort().pop(); return t ? 'Đồng bộ ' + new Date(t).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : 'Dữ liệu đồng hồ'; };
   PAGES.health = t => head('Sức khoẻ', syncedTxt()) + healthBody(t.id || 'sleep');
   function vHealth() {
     const native = window.HealthSync && HealthSync.isNative() && db.settings.hcConnected;
@@ -595,7 +625,9 @@
       if (!s) return `<div class="card empty"><b>Không có dữ liệu ngủ</b>Đêm trước ngày này chưa có trong Health Connect.</div>`;
       const asleep = s.h * 60;
       const napTxt = s.napMin ? ` · ngủ trưa ${s.napMin}′ (${(s.naps || []).map(n => Charts.hm(n[0])).join(', ')})` : '';
-      h += `<div class="card">${bigStat(durTxt(asleep), `${Charts.hm(Math.round(new Date(s.start) / 60000))} – ${Charts.hm(Math.round(new Date(s.end) / 60000))} · nằm ${durTxt(s.inBedH * 60).replace(/<[^>]+>/g, '')}${napTxt}`)}${Charts.hypnogram(s.seg)}</div>`;
+      const scoreCol = s.score >= 80 ? 'var(--ok)' : s.score >= 60 ? 'var(--pr)' : 'var(--bad)';
+      const vit = [s.avgHr && `nhịp tim ${s.avgHr}${s.minHr ? ' (thấp ' + s.minHr + ')' : ''}`, s.spo2 && `SpO2 ${s.spo2}%`, s.breath && `thở ${s.breath}/phút`, s.awakeCount ? `thức giấc ${s.awakeCount} lần` : null].filter(Boolean).join(' · ');
+      h += `<div class="card"><div class="between" style="align-items:flex-start">${bigStat(durTxt(asleep), `${Charts.hm(Math.round(new Date(s.start) / 60000))} – ${Charts.hm(Math.round(new Date(s.end) / 60000))} · nằm ${durTxt(s.inBedH * 60).replace(/<[^>]+>/g, '')}${napTxt}`)}${s.score ? `<div style="text-align:center;margin-top:8px"><div style="font-size:28px;font-weight:850;color:${scoreCol}" class="num">${s.score}</div><div class="tiny muted">điểm ngủ</div></div>` : ''}</div>${Charts.hypnogram(s.seg)}${vit ? `<p class="small muted" style="margin:8px 0 0">Khi ngủ: ${vit}</p>` : ''}</div>`;
       const parts = [['d', s.deepMin], ['l', s.lightMin], ['r', s.remMin], ['a', s.awakeMin]].filter(p => p[1]);
       if (parts.length) {
         const tot = parts.reduce((a, p) => a + p[1], 0);
@@ -611,7 +643,8 @@
     if (!have.length) return `<div class="card empty"><b>Không có dữ liệu ngủ</b>trong khoảng này.</div>`;
     const avg = have.reduce((a, n) => a + n.s.h, 0) / have.length;
     const every = range === 'month' ? 5 : 1;
-    h += `<div class="card">${bigStat(durTxt(avg * 60), `trung bình ${have.length} đêm · ${have.filter(n => n.s.h >= 7).length} đêm ≥ 7 giờ`)}` +
+    const scored = have.filter(n => n.s.score);
+    h += `<div class="card">${bigStat(durTxt(avg * 60), `trung bình ${have.length} đêm · ${have.filter(n => n.s.h >= 7).length} đêm ≥ 7 giờ${scored.length ? ' · điểm TB ' + Math.round(scored.reduce((a, n) => a + n.s.score, 0) / scored.length) : ''}`)}` +
       Charts.bars(nights.map((n, i) => ({ d: n.d, label: dayLabel(range, n.d, i), v: n.s ? Math.max(n.s.h, n.s.inBedH || 0) : 0, parts: n.s ? (n.s.deepMin || n.s.lightMin || n.s.remMin ? [[n.s.deepMin / 60, SC.d], [n.s.lightMin / 60, SC.l], [n.s.remMin / 60, SC.r], [n.s.awakeMin / 60, SC.a]] : [[n.s.h, SC.u]]) : null })), { target: 7, color: '#8d95a3', labelEvery: every, title: 'Giờ ngủ' }) +
       legend([[SC.d, 'Sâu'], [SC.l, 'Nông'], [SC.r, 'REM'], [SC.a, 'Thức']]) + `</div>`;
     const bed = have.map(n => new Date(n.s.start)), wake = have.map(n => new Date(n.s.end));
@@ -656,10 +689,23 @@
     const every = range === 'month' ? 5 : 1;
     const st = days.filter(x => x.o.steps);
     h += `<div class="card">${bigStat(st.length ? Math.round(st.reduce((a, x) => a + x.o.steps, 0) / st.length).toLocaleString('vi-VN') + '<small> bước/ngày</small>' : '—', `${st.filter(x => x.o.steps >= goal).length}/${st.length} ngày đạt ${goal.toLocaleString('vi-VN')}`)}${Charts.bars(days.map((x, i) => ({ d: x.d, label: dayLabel(range, x.d, i), v: x.o.steps || 0 })), { color: Charts.C.steps, hitColor: '#36d16f', target: goal, labelEvery: every, title: 'Bước chân' })}</div>`;
+    const d0 = days[0].d, d1 = days[days.length - 1].d;
+    const ws = ((db.health && db.health.sessions) || []).filter(x => { const d = L.localDate(new Date(x.start)); return d >= d0 && d <= d1; }).reverse();
+    if (ws.length) h += `<div class="section-t"><h2>Buổi tập đồng hồ</h2><span class="tiny muted">${ws.length} buổi</span></div><div class="list">` + ws.slice(0, 20).map(x => `<div class="li" style="cursor:default"><div class="ph" style="color:var(--acc)">${x.trainEffect != null ? x.trainEffect : '♥'}</div><div class="grow"><b>${fmtDate(L.localDate(new Date(x.start)))} · ${Charts.hm(Math.round(new Date(x.start) / 60000))}</b><span class="small muted">${x.durationMin}′ · TB ${x.avgHr || '—'} · max ${x.maxHr || '—'} · ${x.kcal || '—'} kcal${x.trainLoad != null ? ' · tải ' + x.trainLoad : ''}</span></div></div>`).join('') + `</div>`;
     const kc = days.filter(x => x.o.activeKcal);
     if (kc.length) h += `<div class="section-t"><h2>Calo vận động</h2><span class="tiny muted">TB ${Math.round(kc.reduce((a, x) => a + x.o.activeKcal, 0) / kc.length)} kcal/ngày</span></div><div class="card">${Charts.bars(days.map((x, i) => ({ d: x.d, label: dayLabel(range, x.d, i), v: x.o.activeKcal || 0 })), { color: Charts.C.kcal, labelEvery: every, title: 'Calo vận động' })}</div>`;
     return h;
   }
+
+  PAGES.miLogin = () => {
+    const q = ui.miQr || {};
+    let h = head('Đăng nhập Xiaomi', 'Bằng mã QR');
+    if (q.state === 'expired') return h + `<div class="card empty"><b>Mã QR đã hết hạn</b><button class="btn pri" style="margin-top:12px" data-act="miLogin">Tạo mã mới</button></div>`;
+    if (q.state === 'error') return h + `<div class="notice">${esc(q.err || 'Lỗi')}</div><button class="btn pri wide" data-act="miLogin">Thử lại</button>`;
+    h += `<div class="card" style="text-align:center"><img src="${esc(q.img || '')}" alt="Mã QR đăng nhập Xiaomi" style="width:240px;height:240px;background:#fff;border-radius:12px;padding:8px"><p class="small muted"><span class="spinner"></span> Đang chờ bạn xác nhận…</p></div>
+      <div class="card small"><b>Quét trên chính điện thoại này:</b><ol style="margin:8px 0 0;padding-left:20px;line-height:1.7"><li>Chụp màn hình trang này.</li><li>Mở app <b>Máy quét</b> (Scanner) của Xiaomi → biểu tượng <b>ảnh</b> → chọn ảnh vừa chụp.</li><li>Bấm <b>xác nhận đăng nhập</b> → quay lại Gym Log.</li></ol><p class="tiny muted" style="margin-bottom:0">Hoặc quét bằng điện thoại khác đã đăng nhập cùng tài khoản Xiaomi.</p></div>`;
+    return h;
+  };
 
   PAGES.profile = () => {
     const p = db.profile || {}, n = db.nutrition || {};
@@ -965,6 +1011,30 @@
       } catch (e) { alert('Không kết nối được: ' + e.message); }
     },
     hcSync: () => healthSync(true),
+    miLogin: async () => {
+      const http = window.MiSync && MiSync.capacitorHttp();
+      if (!http) { toast('Chỉ có trong bản Android'); return; }
+      const deviceId = MiCloud.newDeviceId();
+      try {
+        const ch = await MiCloud.requestQr(http, deviceId);
+        ui.miQr = { img: ch.qr, state: 'wait' };
+        if (top() && top().type === 'miLogin') render(); else open({ type: 'miLogin' });
+        let login = null;
+        for (let i = 0; i < 4 && !login && ui.miQr; i++) {
+          try { login = await MiCloud.pollQr(http, ch, deviceId); } catch (e) { if (!/timeout|timed out|SocketTimeout/i.test(e.message)) throw e; }
+        }
+        if (!login) { if (ui.miQr) { ui.miQr.state = 'expired'; render(); } return; }
+        const s = await MiCloud.exchangeSts(http, login, deviceId, null);
+        ui.miQr = null; if (top() && top().type === 'miLogin') back();
+        await setMiSession(s);
+      } catch (e) { if (ui.miQr) { ui.miQr.state = 'error'; ui.miQr.err = e.message; render(); } else toast('Đăng nhập Xiaomi lỗi: ' + e.message); }
+    },
+    miImport: () => $('#miFile').click(),
+    miSyncNow: () => miSync(true),
+    miLogout: async () => {
+      if (!confirm('Đăng xuất tài khoản Xiaomi khỏi Gym Log? Dữ liệu đã đồng bộ vẫn giữ.')) return;
+      miSession = null; await Store.put('miSession', null); render(); toast('Đã đăng xuất Xiaomi');
+    },
     openMiFit: async () => {
       const AL = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppLauncher;
       if (!AL) { toast('Chỉ có trong bản Android'); return; }
@@ -998,7 +1068,8 @@
   }
   // Pull the last 30 days from Health Connect. Automatic runs are throttled to once an hour.
   async function healthSync(manual) {
-    if (!window.HealthSync || !HealthSync.isNative() || !db.settings.hcConnected || ui.hcBusy) return;
+    if (!window.HealthSync || !HealthSync.isNative() || ui.hcBusy) return;
+    if (!db.settings.hcConnected) { if (miOn()) await miSync(manual); return; }
     if (!manual && db.health && db.health.lastSync && (db.health.v || 1) >= 3) {
       const hr = new Date().getHours(), missing = !(db.health.days[L.localDate()] || {}).sleep;
       const wait = missing && hr >= 4 && hr < 15 ? 3 * 60e3 : 15 * 60e3;
@@ -1015,10 +1086,41 @@
       db.health.v = 3;
       ui.hcErrors = Object.keys(errors).length ? errors : null;
       save();
-      if (manual) toast(`Đồng bộ xong: ${r.nights} đêm ngủ, ${r.sessions} buổi từ đồng hồ${r.matched ? `, khớp ${r.matched} buổi tập` : ''}`);
+      if (manual && !miOn()) toast(`Đồng bộ xong: ${r.nights} đêm ngủ, ${r.sessions} buổi từ đồng hồ${r.matched ? `, khớp ${r.matched} buổi tập` : ''}`);
     } catch (e) { ui.hcErrors = { sync: e.message }; if (manual) toast('Lỗi đồng bộ: ' + e.message); }
     ui.hcBusy = false;
+    if (miOn()) await miSync(manual);
     if (!top() || ['settings', 'health'].includes(top().type)) render();
+  }
+  // Mi Fitness cloud: full data straight from the Xiaomi account (sleep score/stages, resting HR, all-day HR, watch workouts)
+  async function miSync(manual) {
+    if (!miOn() || ui.miBusy) return;
+    ui.miBusy = true; if (manual) render();
+    try {
+      const H = db.health;
+      const first = !H.miSync;
+      const client = new MiCloud.Client(MiSync.capacitorHttp(), miSession, async s => { miSession = s; await Store.put('miSession', s); });
+      const { data, watermark, errors } = await MiSync.fetchWindow(client, { days: first ? 120 : 10, hrDays: first ? 10 : 3, watermark: H.miWm || 0 });
+      const r = L.ingestMiCloud(db, data);
+      H.miWm = watermark; ui.miErrors = Object.keys(errors).length ? errors : null;
+      H.miLast = { at: new Date().toISOString(), nights: r.nights, sessions: r.sessions, hr: r.hrPoints };
+      save();
+      if (manual) toast(`Xiaomi: ${r.nights} đêm ngủ, ${r.sessions} buổi tập đồng hồ, ${r.hrPoints} mẫu nhịp tim${r.matched ? `, khớp ${r.matched} buổi` : ''}`);
+    } catch (e) {
+      ui.miErrors = { sync: e.message };
+      if (manual || /401|passToken|Gia hạn/i.test(e.message)) toast('Xiaomi: ' + e.message);
+    }
+    ui.miBusy = false;
+    if (!top() || ['settings', 'health'].includes(top().type)) render();
+  }
+  async function setMiSession(s) {
+    const need = ['userId', 'cUserId', 'serviceToken', 'ssecurity', 'passToken', 'deviceId'];
+    const miss = need.filter(k => !s || !s[k]);
+    if (miss.length) throw new Error('Phiên thiếu: ' + miss.join(', '));
+    s.region = s.region || 'sg';
+    miSession = s; await Store.put('miSession', s);
+    db.health.miSync = null; db.health.miWm = 0; save();
+    await miSync(true);
   }
   async function runCoach(fn, q) {
     ui.coachBusy = true; ui.coachResult = null; render();
@@ -1071,6 +1173,11 @@
     if (n) n.focus(); else e.target.blur();
   });
 
+  $('#miFile').addEventListener('change', async ev => {
+    const f = ev.target.files && ev.target.files[0]; ev.target.value = '';
+    if (!f) return;
+    try { await setMiSession(JSON.parse(await f.text())); render(); } catch (e) { alert('Không nhập được phiên Xiaomi: ' + e.message); }
+  });
   $('#importFile').addEventListener('change', async ev => {
     const f = ev.target.files && ev.target.files[0]; ev.target.value = '';
     if (!f) return;
@@ -1122,7 +1229,7 @@
   // ---------- boot ----------
   async function boot() {
     let saved = null;
-    try { saved = await Store.load(); aiKey = (await Store.get('aiKey')) || ''; }
+    try { saved = await Store.load(); aiKey = (await Store.get('aiKey')) || ''; miSession = (await Store.get('miSession')) || null; }
     catch (e) { $('#app').innerHTML = `<div class="notice" style="margin-top:20px">Không mở được bộ nhớ của trình duyệt (${esc(e.message)}). Đừng dùng tab ẩn danh.</div>`; return; }
     db = saved ? L.mergeSeed(L.normalizeDB(saved), SEED) : L.seedDB(SEED);
     history.replaceState({ depth: 0 }, '');
