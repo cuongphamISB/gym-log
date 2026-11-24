@@ -416,23 +416,39 @@
     const out = {};
     const CODE = { deep: 'd', light: 'l', rem: 'r', awake: 'a', inBed: 'a', asleep: 'u' };
     const em = iso => Math.round(new Date(iso).getTime() / 60000); // epoch minutes
-    for (const s of kept) {
-      const d = localDate(new Date(s.endDate));
-      const o = out[d] || (out[d] = { asleepMin: 0, inBedMin: 0, deepMin: 0, remMin: 0, lightMin: 0, awakeMin: 0, start: s.startDate, end: s.endDate, sessions: 0, seg: [] });
-      if (s.stages && s.stages.length) for (const st of s.stages) { if (st.startDate && st.endDate) o.seg.push([em(st.startDate), em(st.endDate), CODE[st.stage] || 'u']); }
-      else o.seg.push([em(s.startDate), em(s.endDate), 'u']);
-      o.sessions++;
-      if (s.startDate < o.start) o.start = s.startDate;
-      if (s.endDate > o.end) o.end = s.endDate;
-      const dur = (new Date(s.endDate) - new Date(s.startDate)) / 60000;
-      o.inBedMin += dur;
-      if (s.stages && s.stages.length) {
-        for (const st of s.stages) {
-          const m = st.durationMinutes || 0;
-          if (st.stage === 'awake' || st.stage === 'inBed') o.awakeMin += m;
-          else { o.asleepMin += m; if (st.stage === 'deep') o.deepMin += m; else if (st.stage === 'rem') o.remMin += m; else if (st.stage === 'light') o.lightMin += m; }
+    const dur = s => (new Date(s.endDate) - new Date(s.startDate)) / 60000;
+    // group by wake-up date; the night = longest session + pieces within 90 min of it (split nights); the rest are naps
+    const groups = {};
+    for (const s of kept) (groups[localDate(new Date(s.endDate))] = groups[localDate(new Date(s.endDate))] || []).push(s);
+    for (const [d, list] of Object.entries(groups)) {
+      const main = list.reduce((a, b) => dur(b) > dur(a) ? b : a);
+      let night = [main], changed = true;
+      while (changed) {
+        changed = false;
+        for (const s of list) {
+          if (night.includes(s)) continue;
+          const n0 = Math.min(...night.map(x => +new Date(x.startDate))), n1 = Math.max(...night.map(x => +new Date(x.endDate)));
+          const gap = Math.max(+new Date(s.startDate) - n1, n0 - +new Date(s.endDate));
+          if (gap <= 90 * 60000) { night.push(s); changed = true; }
         }
-      } else o.asleepMin += dur;
+      }
+      const naps = list.filter(s => !night.includes(s));
+      const o = out[d] = { asleepMin: 0, inBedMin: 0, deepMin: 0, remMin: 0, lightMin: 0, awakeMin: 0, start: main.startDate, end: main.endDate, sessions: night.length, seg: [],
+        napMin: Math.round(naps.reduce((a, s) => a + dur(s), 0)), naps: naps.map(s => [em(s.startDate), em(s.endDate)]) };
+      for (const s of night) {
+        if (s.stages && s.stages.length) for (const st of s.stages) { if (st.startDate && st.endDate) o.seg.push([em(st.startDate), em(st.endDate), CODE[st.stage] || 'u']); }
+        else o.seg.push([em(s.startDate), em(s.endDate), 'u']);
+        if (s.startDate < o.start) o.start = s.startDate;
+        if (s.endDate > o.end) o.end = s.endDate;
+        o.inBedMin += dur(s);
+        if (s.stages && s.stages.length) {
+          for (const st of s.stages) {
+            const m = st.durationMinutes || 0;
+            if (st.stage === 'awake' || st.stage === 'inBed') o.awakeMin += m;
+            else { o.asleepMin += m; if (st.stage === 'deep') o.deepMin += m; else if (st.stage === 'rem') o.remMin += m; else if (st.stage === 'light') o.lightMin += m; }
+          }
+        } else o.asleepMin += dur(s);
+      }
     }
     return out;
   }
@@ -444,7 +460,7 @@
     const day = d => H.days[d] || (H.days[d] = {});
     const nights = sleepByNight(raw.sleep);
     for (const [d, n] of Object.entries(nights)) {
-      day(d).sleep = { h: round1(n.asleepMin / 60), inBedH: round1(n.inBedMin / 60), deepMin: Math.round(n.deepMin), remMin: Math.round(n.remMin), lightMin: Math.round(n.lightMin), awakeMin: Math.round(n.awakeMin), start: n.start, end: n.end, seg: n.seg.sort((a, b) => a[0] - b[0]) };
+      day(d).sleep = { h: round1(n.asleepMin / 60), inBedH: round1(n.inBedMin / 60), deepMin: Math.round(n.deepMin), remMin: Math.round(n.remMin), lightMin: Math.round(n.lightMin), awakeMin: Math.round(n.awakeMin), start: n.start, end: n.end, seg: n.seg.sort((a, b) => a[0] - b[0]), napMin: n.napMin || 0, naps: n.naps || [] };
     }
     const agg = (arr, key) => { for (const s of arr || []) { const v = s.value; if (v === null || v === undefined || !Number.isFinite(v)) continue; day(localDate(new Date(s.startDate)))[key] = Math.round(v); } };
     agg(raw.steps, 'steps'); agg(raw.activeKcal, 'activeKcal');
@@ -458,7 +474,10 @@
       const t = new Date(s.startDate), o = day(localDate(t));
       (o.hrH = o.hrH || {})[t.getHours()] = [Math.round(v.min), Math.round(v.max), Math.round(v.average)];
     }
-    for (const o of Object.values(H.days)) if (o.hrH) { const hs = Object.values(o.hrH); o.hrMin = Math.min(...hs.map(x => x[0])); o.hrMax = Math.max(...hs.map(x => x[1])); }
+    for (const o of Object.values(H.days)) if (o.hrH) {
+      const hs = Object.values(o.hrH); o.hrMin = Math.min(...hs.map(x => x[0])); o.hrMax = Math.max(...hs.map(x => x[1]));
+      if ((!o.restHr || o.restHrEst) && hs.length >= 6) { o.restHr = Math.min(...hs.map(x => x[2])); o.restHrEst = true; }
+    }
     for (const s of raw.stepsHourly || []) {
       if (!Number.isFinite(s.value) || !s.value) continue;
       const t = new Date(s.startDate), o = day(localDate(t));

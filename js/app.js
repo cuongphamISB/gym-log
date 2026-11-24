@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const L = self.L, Store = self.Store, Coach = self.Coach, SEED = self.SEED;
-  const VERSION = '1.3.0';
+  const VERSION = '1.4.0';
 
   // ---------- helpers ----------
   const $ = s => document.querySelector(s);
@@ -127,7 +127,7 @@
         <p class="small" style="margin:10px 0 0;color:${col}">${SLEEP[rd.level][2]}</p></div>`;
     } else if (window.HealthSync && HealthSync.isNative() && db.settings.hcConnected) {
       const lr = db.health && db.health.lastResult;
-      h += `<div class="section-t"><h2>Hồi phục</h2></div><div class="card"><div class="between"><span class="small"><b>Chưa có giấc ngủ đêm qua</b><br><span class="muted">${lr && lr.latestSleepEnd ? 'Gần nhất trong Health Connect: ' + new Date(lr.latestSleepEnd).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : 'Health Connect chưa có dữ liệu ngủ'}</span></span><button class="btn sm" data-act="hcSync" ${ui.hcBusy ? 'disabled' : ''}>${ui.hcBusy ? '<span class="spinner"></span>' : 'Đồng bộ'}</button></div><p class="tiny muted" style="margin:8px 0 0">Mi Fitness chỉ ghi giấc ngủ vào Health Connect sau khi đồng hồ đồng bộ. Mở Mi Fitness, kéo xuống để đồng bộ, rồi quay lại đây.</p></div>`;
+      h += `<div class="section-t"><h2>Hồi phục</h2></div><div class="card"><div class="between"><span class="small"><b>Chưa có giấc ngủ đêm qua</b><br><span class="muted">${lr && lr.latestSleepEnd ? 'Gần nhất trong Health Connect: ' + new Date(lr.latestSleepEnd).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : 'Health Connect chưa có dữ liệu ngủ'}</span></span></div><div class="grid2" style="margin-top:10px"><button class="btn sm pri" data-act="openMiFit">Mở Mi Fitness</button><button class="btn sm" data-act="hcSync" ${ui.hcBusy ? 'disabled' : ''}>${ui.hcBusy ? '<span class="spinner"></span>' : 'Đồng bộ lại'}</button></div><p class="tiny muted" style="margin:8px 0 0">Mi Fitness chỉ gửi dữ liệu sang Health Connect khi được mở. Bấm "Mở Mi Fitness", đợi nó tải xong rồi vuốt Back — app tự đồng bộ.</p></div>`;
     } else {
       h += `<div class="section-t"><h2>Ngủ đêm qua</h2></div><div class="grid3">` + Object.entries(SLEEP).map(([k, v]) => `<button class="chip ${ui.sleep === k ? 'on' : ''}" style="flex-direction:column;min-height:52px;border-radius:14px;justify-content:center;gap:0" data-act="sleep" data-v="${k}"><span>${v[0]}</span><span class="tiny" style="opacity:.7">${v[1]}</span></button>`).join('') + `</div>`;
       if (ui.sleep) h += `<p class="small" style="margin:8px 2px 0;color:${ui.sleep === 'good' ? 'var(--ok)' : 'var(--pr)'}">${SLEEP[ui.sleep][2]}</p>`;
@@ -517,6 +517,7 @@
     h += `<div class="section-t"><h2>Bộ nhớ</h2></div><div class="card small"><div class="between"><span>Lưu bền (Chrome không tự xoá)</span><b style="color:${persisted ? 'var(--ok)' : 'var(--pr)'}">${persisted ? 'Đã bật' : persisted === false ? 'Chưa — hãy cài app ra màn hình chính' : 'Không rõ'}</b></div><div class="between" style="margin-top:6px"><span>Dung lượng dùng</span><b id="usage">…</b></div></div>`;
     h += `<div class="section-t"><h2>Khi tập</h2></div><div class="card" style="padding:4px 16px">
       <div class="switch"><span>Bước tăng tạ gợi ý</span><select class="inp" style="width:auto;min-height:38px" data-setting="kgStep">${[0.5, 1, 2, 2.5, 5].map(v => `<option ${s.kgStep === v ? 'selected' : ''} value="${v}">${v} kg</option>`).join('')}</select></div>
+      <div class="switch"><span>Mục tiêu bước/ngày</span><select class="inp" style="width:auto;min-height:38px" data-setting="stepGoal">${[5000, 6000, 7000, 8000, 10000, 12000].map(v => `<option ${(s.stepGoal || 8000) === v ? 'selected' : ''} value="${v}">${v.toLocaleString('vi-VN')}</option>`).join('')}</select></div>
       <label class="switch"><span>Tự bật đồng hồ nghỉ khi tick hiệp</span><input type="checkbox" data-setting="autoRest" ${s.autoRest ? 'checked' : ''}></label>
       <label class="switch"><span>Âm báo hết giờ nghỉ</span><input type="checkbox" data-setting="sound" ${s.sound ? 'checked' : ''}></label>
       <label class="switch"><span>Rung khi hết giờ nghỉ</span><input type="checkbox" data-setting="vibrate" ${s.vibrate ? 'checked' : ''}></label></div>`;
@@ -581,6 +582,8 @@
     if (metric === 'sleep') h += healthSleep(range, days);
     else if (metric === 'hr') h += healthHr(range, days);
     else h += healthActivity(range, days);
+    if (window.HealthSync && HealthSync.isNative() && db.settings.hcConnected && !(HD[today] || {}).sleep && anchor === today && metric === 'sleep')
+      h = `<div class="notice info" style="display:flex;gap:10px;align-items:center"><span class="grow">Chưa có giấc ngủ đêm qua. Mi Fitness chỉ gửi dữ liệu khi được mở.</span><button class="btn sm pri" data-act="openMiFit">Mở Mi Fitness</button></div>` + h;
     if (!Object.keys(HD).length) h += `<div class="notice info">Chưa có dữ liệu. ${window.HealthSync && HealthSync.isNative() ? 'Vào Cài đặt → Đồng hồ · Health Connect → Kết nối.' : 'Dữ liệu đồng hồ chỉ có ở bản Android (Cài đặt → Tải APK).'}</div>`;
     return h;
   };
@@ -591,7 +594,8 @@
       const s = days[0].o.sleep;
       if (!s) return `<div class="card empty"><b>Không có dữ liệu ngủ</b>Đêm trước ngày này chưa có trong Health Connect.</div>`;
       const asleep = s.h * 60;
-      h += `<div class="card">${bigStat(durTxt(asleep), `${Charts.hm(Math.round(new Date(s.start) / 60000))} – ${Charts.hm(Math.round(new Date(s.end) / 60000))} · nằm ${durTxt(s.inBedH * 60).replace(/<[^>]+>/g, '')}`)}${Charts.hypnogram(s.seg)}</div>`;
+      const napTxt = s.napMin ? ` · ngủ trưa ${s.napMin}′ (${(s.naps || []).map(n => Charts.hm(n[0])).join(', ')})` : '';
+      h += `<div class="card">${bigStat(durTxt(asleep), `${Charts.hm(Math.round(new Date(s.start) / 60000))} – ${Charts.hm(Math.round(new Date(s.end) / 60000))} · nằm ${durTxt(s.inBedH * 60).replace(/<[^>]+>/g, '')}${napTxt}`)}${Charts.hypnogram(s.seg)}</div>`;
       const parts = [['d', s.deepMin], ['l', s.lightMin], ['r', s.remMin], ['a', s.awakeMin]].filter(p => p[1]);
       if (parts.length) {
         const tot = parts.reduce((a, p) => a + p[1], 0);
@@ -624,8 +628,8 @@
     if (range === 'day') {
       const o = days[0].o;
       const items = [...Array(24)].map((_, hr) => { const v = o.hrH && o.hrH[hr]; return { label: hr % 6 === 0 ? String(hr) : '', min: v && v[0], max: v && v[1], avg: v && v[2] }; });
-      if (!o.hrH && !o.restHr) return `<div class="card empty"><b>Không có dữ liệu nhịp tim</b>cho ngày này.</div>`;
-      h += `<div class="card">${bigStat(o.hrMin ? `${o.hrMin}–${o.hrMax}<small> bpm</small>` : '—', [o.restHr && `nghỉ ${o.restHr} bpm`, o.hrv && `HRV ${o.hrv} ms`].filter(Boolean).join(' · '))}${Charts.rangeBars(items, { title: 'Nhịp tim theo giờ', line: o.restHr })}${legend([[Charts.C.hr, 'thấp nhất – cao nhất'], ['#fff', 'trung bình'], [Charts.C.hrv, 'nhịp tim nghỉ']])}</div>`;
+      if (!o.hrH && !o.restHr) return `<div class="card empty"><b>Không có dữ liệu nhịp tim</b>Health Connect chưa có nhịp tim ngày này. Mi Fitness không phải lúc nào cũng gửi nhịp tim — mở Mi Fitness rồi đồng bộ lại.</div>`;
+      h += `<div class="card">${bigStat(o.hrMin ? `${o.hrMin}–${o.hrMax}<small> bpm</small>` : '—', [o.restHr && `nghỉ ${o.restHr} bpm`, o.hrv && `HRV ${o.hrv} ms`].filter(Boolean).join(' · '))}${Charts.rangeBars(items, { title: 'Nhịp tim theo giờ', line: o.restHr })}${legend([[Charts.C.hr, 'thấp nhất – cao nhất'], ['#fff', 'trung bình'], [Charts.C.hrv, o.restHrEst ? 'nhịp nghỉ (ước tính)' : 'nhịp tim nghỉ']])}</div>`;
       const ws = L.finished(db).filter(w => w.date === days[0].d && w.avgHr);
       if (ws.length) h += `<div class="card small">${ws.map(w => `<div class="between"><span>${esc(w.name)}</span><b>${w.avgHr} TB${w.maxHr ? ' · ' + w.maxHr + ' max' : ''}</b></div>`).join('')}</div>`;
       return h;
@@ -959,6 +963,12 @@
       } catch (e) { alert('Không kết nối được: ' + e.message); }
     },
     hcSync: () => healthSync(true),
+    openMiFit: async () => {
+      const AL = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppLauncher;
+      if (!AL) { toast('Chỉ có trong bản Android'); return; }
+      try { ui.syncOnResume = true; await AL.openUrl({ url: 'com.xiaomi.wearable' }); }
+      catch (e) { ui.syncOnResume = false; toast('Không mở được Mi Fitness: ' + e.message); }
+    },
     hcSettings: () => HealthSync.openSettings().catch(e => toast(e.message)),
     aiReview: () => runCoach(() => Coach.review(db, db.settings.ai, aiKey), null),
     aiAsk: () => { const q = $('#aiQ').value.trim(); if (!q) { toast('Nhập câu hỏi'); return; } runCoach(() => Coach.ask(db, db.settings.ai, aiKey, q), q); },
@@ -987,7 +997,7 @@
   // Pull the last 30 days from Health Connect. Automatic runs are throttled to once an hour.
   async function healthSync(manual) {
     if (!window.HealthSync || !HealthSync.isNative() || !db.settings.hcConnected || ui.hcBusy) return;
-    if (!manual && db.health && db.health.lastSync && (db.health.v || 1) >= 2) {
+    if (!manual && db.health && db.health.lastSync && (db.health.v || 1) >= 3) {
       const hr = new Date().getHours(), missing = !(db.health.days[L.localDate()] || {}).sleep;
       const wait = missing && hr >= 4 && hr < 15 ? 3 * 60e3 : 15 * 60e3;
       if (Date.now() - new Date(db.health.lastSync) < wait) return;
@@ -995,12 +1005,12 @@
     ui.hcBusy = true; if (manual) render();
     try {
       // 90 days on first sync, and once more when the stored detail format changes (v2: sleep stages, hourly HR/steps, workout HR)
-      const firstSync = !(db.health && db.health.lastSync) || (db.health.v || 1) < 2;
+      const firstSync = !(db.health && db.health.lastSync) || (db.health.v || 1) < 3;
       const { raw, errors } = await HealthSync.fetchAll(firstSync ? 90 : 30);
       const r = L.ingestHealth(db, raw);
       const ends = (raw.sleep || []).map(x => x.endDate).sort();
       db.health.lastResult = { at: new Date().toISOString(), sleepRecords: (raw.sleep || []).length, latestSleepEnd: ends[ends.length - 1] || null, workouts: (raw.workouts || []).length, restHr: (raw.restHr || []).length, hrHours: (raw.hrHourly || []).length, steps: (raw.steps || []).length };
-      db.health.v = 2;
+      db.health.v = 3;
       ui.hcErrors = Object.keys(errors).length ? errors : null;
       save();
       if (manual) toast(`Đồng bộ xong: ${r.nights} đêm ngủ, ${r.sessions} buổi từ đồng hồ${r.matched ? `, khớp ${r.matched} buổi tập` : ''}`);
@@ -1108,7 +1118,7 @@
       const App = window.Capacitor.Plugins.App;
       if (App) {
         App.addListener('backButton', handleBack);
-        App.addListener('resume', () => { healthSync(false); render(); });
+        App.addListener('resume', () => { const m = ui.syncOnResume; ui.syncOnResume = false; healthSync(!!m); render(); });
       }
       healthSync(false);
     }

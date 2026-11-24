@@ -244,3 +244,16 @@ test('detail health data: sleep segments, summed total kcal, hourly HR/steps, wo
   assert.deepEqual(L.zoneMinutes(db.health.sessions[0].hr, 190), [0.5, 0, 0.5, 0.5, 0.5]);
   assert.equal(L.maxHrFor({ profile: { age: 30 } }), 187);
 });
+
+test('sleepByNight keeps naps out of the night and joins split nights', () => {
+  const n = L.sleepByNight([
+    { startDate: '2026-11-22T18:04:00Z', endDate: '2026-11-23T00:00:00Z' },   // night part 1
+    { startDate: '2026-11-23T00:40:00Z', endDate: '2026-11-23T02:04:00Z' },   // night part 2 (40 min gap)
+    { startDate: '2026-11-23T09:48:00Z', endDate: '2026-11-23T10:13:00Z' },   // afternoon nap
+  ]);
+  const d = L.localDate(new Date('2026-11-23T02:04:00Z'));
+  assert.equal(n[d].sessions, 2);
+  assert.equal(n[d].napMin, 25);
+  assert.equal(n[d].end, '2026-11-23T02:04:00Z');
+  assert.equal(Math.round(n[d].asleepMin), 356 + 84);
+});

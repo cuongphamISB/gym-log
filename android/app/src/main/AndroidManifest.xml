@@ -38,6 +38,11 @@
 
     <!-- Permissions -->
 
+    <!-- open Mi Fitness so it pushes fresh data to Health Connect -->
+    <queries>
+        <package android:name="com.xiaomi.wearable" />
+    </queries>
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Health Connect: read more than 30 days of history -->

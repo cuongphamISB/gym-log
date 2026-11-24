@@ -100,7 +100,8 @@
     const Y = m => T + (m - lo) / Math.max(60, hi - lo) * (H - T - B);
     const n = nights.length, slot = (W - L - R) / n, bw = Math.max(3, Math.min(14, slot * 0.55));
     let body = '';
-    for (let m = lo; m <= hi; m += 120) { const hh = (18 + m / 60) % 24; body += `<line x1="${L}" x2="${W - R}" y1="${fx(Y(m))}" y2="${fx(Y(m))}" stroke="${C.grid}"/>` + txt(L - 4, Y(m) + 3, `${pad2(hh)}:00`, 'end'); }
+    const step = hi - lo > 600 ? 240 : 120;
+    for (let m = lo; m <= hi; m += step) { const hh = (18 + m / 60) % 24; body += `<line x1="${L}" x2="${W - R}" y1="${fx(Y(m))}" y2="${fx(Y(m))}" stroke="${C.grid}"/>` + txt(L - 4, Y(m) + 3, `${pad2(hh)}:00`, 'end'); }
     nights.forEach((nt, i) => {
       const x = L + slot * i + slot / 2;
       if (nt && nt.start) { const a = rel(nt.start), b = rel(nt.end); body += `<rect x="${fx(x - bw / 2)}" y="${fx(Y(a))}" width="${fx(bw)}" height="${fx(Math.max(2, Y(b) - Y(a)))}" rx="${fx(bw / 2)}" fill="${C.sleep.l}" opacity=".85"/>`; }
