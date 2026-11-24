@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const L = self.L, Store = self.Store, Coach = self.Coach, SEED = self.SEED;
-  const VERSION = '1.2.0';
+  const VERSION = '1.3.0';
 
   // ---------- helpers ----------
   const $ = s => document.querySelector(s);
@@ -21,6 +21,7 @@
     up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>',
     down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+    sync: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>',
     spark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z"/></svg>',
   };
   const COLS = {
@@ -62,7 +63,7 @@
 
   // ---------- render ----------
   function render() {
-    $('#app').innerHTML = ({ today: vToday, history: vHistory, progress: vProgress, library: vLibrary })[ui.tab]();
+    $('#app').innerHTML = ({ today: vToday, health: vHealth, history: vHistory, progress: vProgress, library: vLibrary })[ui.tab]();
     document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
     renderPage();
     renderRest();
@@ -124,6 +125,9 @@
       h += `<div class="section-t"><h2>Hồi phục</h2><button data-act="open" data-page="health" data-id="sleep" data-range="day">Chi tiết ›</button></div><div class="card"><div class="between"><b style="color:${col};font-size:18px">${{ good: 'Tốt', mid: 'Trung bình', low: 'Thấp' }[rd.level]}</b><span class="small muted">${esc(rd.why.join(' · '))}</span></div>
         <div class="grid3" style="margin-top:10px">${[['Ngủ', rd.sleepH !== null ? rd.sleepH + 'h' : '—'], ['Ngủ sâu', rd.deepMin ? rd.deepMin + '′' : '—'], ['Nhịp nghỉ', rd.restHr ? rd.restHr + (rd.rhrDelta !== null ? ` (${rd.rhrDelta >= 0 ? '+' : ''}${rd.rhrDelta})` : '') : '—']].map(([k, v]) => `<div><div class="tiny muted">${k}</div><b class="num">${v}</b></div>`).join('')}</div>
         <p class="small" style="margin:10px 0 0;color:${col}">${SLEEP[rd.level][2]}</p></div>`;
+    } else if (window.HealthSync && HealthSync.isNative() && db.settings.hcConnected) {
+      const lr = db.health && db.health.lastResult;
+      h += `<div class="section-t"><h2>Hồi phục</h2></div><div class="card"><div class="between"><span class="small"><b>Chưa có giấc ngủ đêm qua</b><br><span class="muted">${lr && lr.latestSleepEnd ? 'Gần nhất trong Health Connect: ' + new Date(lr.latestSleepEnd).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : 'Health Connect chưa có dữ liệu ngủ'}</span></span><button class="btn sm" data-act="hcSync" ${ui.hcBusy ? 'disabled' : ''}>${ui.hcBusy ? '<span class="spinner"></span>' : 'Đồng bộ'}</button></div><p class="tiny muted" style="margin:8px 0 0">Mi Fitness chỉ ghi giấc ngủ vào Health Connect sau khi đồng hồ đồng bộ. Mở Mi Fitness, kéo xuống để đồng bộ, rồi quay lại đây.</p></div>`;
     } else {
       h += `<div class="section-t"><h2>Ngủ đêm qua</h2></div><div class="grid3">` + Object.entries(SLEEP).map(([k, v]) => `<button class="chip ${ui.sleep === k ? 'on' : ''}" style="flex-direction:column;min-height:52px;border-radius:14px;justify-content:center;gap:0" data-act="sleep" data-v="${k}"><span>${v[0]}</span><span class="tiny" style="opacity:.7">${v[1]}</span></button>`).join('') + `</div>`;
       if (ui.sleep) h += `<p class="small" style="margin:8px 2px 0;color:${ui.sleep === 'good' ? 'var(--ok)' : 'var(--pr)'}">${SLEEP[ui.sleep][2]}</p>`;
@@ -523,6 +527,7 @@
       h += `<div class="between"><span>Trạng thái</span><b style="color:${db.settings.hcConnected ? 'var(--ok)' : 'var(--pr)'}">${db.settings.hcConnected ? 'Đã kết nối' : 'Chưa kết nối'}</b></div>
         <div class="between" style="margin-top:6px"><span>Lần đồng bộ cuối</span><b>${H.lastSync ? new Date(H.lastSync).toLocaleString('vi-VN') : '—'}</b></div>
         <div class="between" style="margin-top:6px"><span>Đã có</span><b>${nights} đêm ngủ · ${(H.sessions || []).length} buổi từ đồng hồ</b></div>
+        ${H.lastResult ? `<div class="between" style="margin-top:6px"><span>Giấc ngủ mới nhất</span><b>${H.lastResult.latestSleepEnd ? new Date(H.lastResult.latestSleepEnd).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '—'}</b></div>` : ''}
         ${ui.hcErrors ? `<p class="tiny" style="color:var(--pr)">Lỗi đọc: ${esc(Object.entries(ui.hcErrors).map(([k, v]) => k + ': ' + v).join('; '))}</p>` : ''}
         <div class="grid2" style="margin-top:12px"><button class="btn ${db.settings.hcConnected ? '' : 'pri'}" data-act="hcConnect">${db.settings.hcConnected ? 'Cấp lại quyền' : 'Kết nối'}</button><button class="btn" data-act="hcSync" ${ui.hcBusy ? 'disabled' : ''}>${ui.hcBusy ? '<span class="spinner"></span>' : 'Đồng bộ ngay'}</button></div>
         <button class="btn ghost wide" style="margin-top:8px" data-act="hcSettings">Mở cài đặt Health Connect</button>
@@ -556,12 +561,18 @@
   function bigStat(value, sub) { return `<div style="margin:6px 2px 10px"><div style="font-size:30px;font-weight:850;letter-spacing:-.8px" class="num">${value}</div>${sub ? `<div class="small muted">${sub}</div>` : ''}</div>`; }
   function legend(items) { return `<div class="row wrap" style="gap:12px;margin-top:6px">${items.map(([c, l]) => `<span class="tiny muted"><i style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${c};margin-right:5px"></i>${l}</span>`).join('')}</div>`; }
 
-  PAGES.health = t => {
-    const metric = t.id || 'sleep', range = ui.hRange || 'day', anchor = ui.hDate || L.localDate();
+  const syncedTxt = () => db.health && db.health.lastSync ? 'Đồng bộ ' + new Date(db.health.lastSync).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : 'Dữ liệu từ Health Connect';
+  PAGES.health = t => head('Sức khoẻ', syncedTxt()) + healthBody(t.id || 'sleep');
+  function vHealth() {
+    const native = window.HealthSync && HealthSync.isNative() && db.settings.hcConnected;
+    return `<div class="topbar"><div><div class="eyebrow">${esc(syncedTxt())}</div><h1>Sức khoẻ</h1></div><div class="row" style="gap:8px">${native ? `<button class="iconbtn" data-act="hcSync" aria-label="Đồng bộ ngay" ${ui.hcBusy ? 'disabled' : ''}>${ui.hcBusy ? '<span class="spinner"></span>' : I.sync}</button>` : ''}<button class="iconbtn" data-act="open" data-page="settings" aria-label="Cài đặt">${I.gear}</button></div></div>` + healthBody(ui.hMetric || 'sleep');
+  }
+  function healthBody(metric) {
+    const range = ui.hRange || 'day', anchor = ui.hDate || L.localDate();
     const HD = (db.health && db.health.days) || {};
     const dates = healthRange(range, anchor);
     const today = L.localDate();
-    let h = head('Sức khoẻ', db.health && db.health.lastSync ? 'Đồng bộ ' + new Date(db.health.lastSync).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : 'Dữ liệu từ Health Connect');
+    let h = '';
     h += `<div class="seg">${[['sleep', 'Ngủ'], ['hr', 'Nhịp tim'], ['activity', 'Hoạt động']].map(([k, l]) => `<button class="${metric === k ? 'on' : ''}" data-act="hMetric" data-v="${k}">${l}</button>`).join('')}</div>`;
     h += `<div class="row" style="margin-bottom:12px;gap:8px"><div class="chips" style="flex:1">${[['day', 'Ngày'], ['week', 'Tuần'], ['month', 'Tháng']].map(([k, l]) => `<button class="chip ${range === k ? 'on' : ''}" data-act="hRange" data-v="${k}">${l}</button>`).join('')}</div></div>`;
     const canNext = dates[dates.length - 1] < today;
@@ -778,7 +789,7 @@
   const ACT = {
     tab: b => { ui.tab = b.dataset.tab; window.scrollTo(0, 0); render(); },
     back: () => back(),
-    open: b => { const page = b.dataset.page; if (page === 'picker') ui.pickQ = ''; if (page === 'health') { ui.hDate = null; if (b.dataset.range) ui.hRange = b.dataset.range; } open({ type: page, id: b.dataset.id || '' }); },
+    open: b => { const page = b.dataset.page; if (page === 'picker') ui.pickQ = ''; if (page === 'health') { ui.hDate = null; if (b.dataset.range) ui.hRange = b.dataset.range; ui.hMetric = b.dataset.id || ui.hMetric; closeAllPages(); ui.tab = 'health'; window.scrollTo(0, 0); render(); return; } open({ type: page, id: b.dataset.id || '' }); },
     install: async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; render(); },
     sleep: b => { ui.sleep = ui.sleep === b.dataset.v ? null : b.dataset.v; render(); },
     start: b => {
@@ -916,7 +927,7 @@
       aiKey = $('#aiKey').value.trim();
       await Store.put('aiKey', aiKey); save(); toast('Đã lưu cấu hình'); render();
     },
-    hMetric: b => replaceTop({ type: 'health', id: b.dataset.v }),
+    hMetric: b => { if (top() && top().type === 'health') replaceTop({ type: 'health', id: b.dataset.v }); else { ui.hMetric = b.dataset.v; render(); } },
     hRange: b => { ui.hRange = b.dataset.v; render(); },
     hNav: b => {
       const r = ui.hRange || 'day', a = ui.hDate || L.localDate(), d = +b.dataset.d;
@@ -976,20 +987,26 @@
   // Pull the last 30 days from Health Connect. Automatic runs are throttled to once an hour.
   async function healthSync(manual) {
     if (!window.HealthSync || !HealthSync.isNative() || !db.settings.hcConnected || ui.hcBusy) return;
-    if (!manual && db.health && db.health.lastSync && (db.health.v || 1) >= 2 && Date.now() - new Date(db.health.lastSync) < 3600e3) return;
+    if (!manual && db.health && db.health.lastSync && (db.health.v || 1) >= 2) {
+      const hr = new Date().getHours(), missing = !(db.health.days[L.localDate()] || {}).sleep;
+      const wait = missing && hr >= 4 && hr < 15 ? 3 * 60e3 : 15 * 60e3;
+      if (Date.now() - new Date(db.health.lastSync) < wait) return;
+    }
     ui.hcBusy = true; if (manual) render();
     try {
       // 90 days on first sync, and once more when the stored detail format changes (v2: sleep stages, hourly HR/steps, workout HR)
       const firstSync = !(db.health && db.health.lastSync) || (db.health.v || 1) < 2;
       const { raw, errors } = await HealthSync.fetchAll(firstSync ? 90 : 30);
       const r = L.ingestHealth(db, raw);
+      const ends = (raw.sleep || []).map(x => x.endDate).sort();
+      db.health.lastResult = { at: new Date().toISOString(), sleepRecords: (raw.sleep || []).length, latestSleepEnd: ends[ends.length - 1] || null, workouts: (raw.workouts || []).length, restHr: (raw.restHr || []).length, hrHours: (raw.hrHourly || []).length, steps: (raw.steps || []).length };
       db.health.v = 2;
       ui.hcErrors = Object.keys(errors).length ? errors : null;
       save();
       if (manual) toast(`Đồng bộ xong: ${r.nights} đêm ngủ, ${r.sessions} buổi từ đồng hồ${r.matched ? `, khớp ${r.matched} buổi tập` : ''}`);
     } catch (e) { ui.hcErrors = { sync: e.message }; if (manual) toast('Lỗi đồng bộ: ' + e.message); }
     ui.hcBusy = false;
-    if (!top() || top().type === 'settings') render();
+    if (!top() || ['settings', 'health'].includes(top().type)) render();
   }
   async function runCoach(fn, q) {
     ui.coachBusy = true; ui.coachResult = null; render();
@@ -1063,6 +1080,15 @@
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; if (ui.tab === 'today' && !top()) render(); });
   window.addEventListener('appinstalled', () => { installEvt = null; Store.persist().then(p => { persisted = p; }); render(); });
 
+  // Android back button / back gesture: close the open page, then return to Today, then minimise (never kill the app mid-workout)
+  function handleBack() {
+    if (document.querySelector('.toast')) $('#toast-root').innerHTML = '';
+    if (ui.stack.length) { back(); return; }
+    if (ui.tab !== 'today') { ui.tab = 'today'; window.scrollTo(0, 0); render(); return; }
+    const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+    if (App) App.minimizeApp();
+  }
+
   // ---------- boot ----------
   async function boot() {
     let saved = null;
@@ -1077,7 +1103,15 @@
     Store.snapshotDaily(db, L.localDate()).catch(() => {});
     persisted = await Store.persist();
     const native = window.HealthSync && HealthSync.isNative();
-    if (native) { persisted = true; healthSync(false); } // app storage is not evicted like browser storage
+    if (native) {
+      persisted = true; // app storage is not evicted like browser storage
+      const App = window.Capacitor.Plugins.App;
+      if (App) {
+        App.addListener('backButton', handleBack);
+        App.addListener('resume', () => { healthSync(false); render(); });
+      }
+      healthSync(false);
+    }
     if (!native && 'serviceWorker' in navigator && location.protocol !== 'file:') {
       navigator.serviceWorker.register('sw.js').catch(() => {});
       let had = !!navigator.serviceWorker.controller;
