@@ -623,6 +623,7 @@
     if (all) h += `<div class="card small">${[['d', 'deepMin'], ['l', 'lightMin'], ['r', 'remMin']].map(([k, f]) => `<div class="between" style="padding:4px 0"><span><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${SC[k]};margin-right:8px"></i>${SN[k]}</span><b class="num">${Math.round(tot(f) / have.length)}′/đêm · ${Math.round(tot(f) / all * 100)}%</b></div>`).join('')}</div>`;
     return h;
   }
+  function lastHrDay() { const HD = (db.health && db.health.days) || {}; return Object.keys(HD).filter(k => HD[k].hrH).sort().pop() || null; }
   function healthHr(range, days) {
     let h = '';
     if (range === 'day') {
@@ -636,7 +637,7 @@
     }
     const every = range === 'month' ? 5 : 1;
     const rest = days.filter(x => x.o.restHr);
-    h += `<div class="card">${bigStat(rest.length ? Math.round(rest.reduce((a, x) => a + x.o.restHr, 0) / rest.length) + '<small> bpm</small>' : '—', 'nhịp tim nghỉ trung bình')}${Charts.rangeBars(days.map((x, i) => ({ d: x.d, label: dayLabel(range, x.d, i), min: x.o.hrMin, max: x.o.hrMax, avg: x.o.restHr })), { labelEvery: every, title: 'Nhịp tim theo ngày' }) || '<p class="small muted">Chưa có nhịp tim theo ngày.</p>'}${legend([[Charts.C.hr, 'thấp – cao trong ngày'], ['#fff', 'nhịp nghỉ']])}</div>`;
+    h += `<div class="card">${bigStat(rest.length ? Math.round(rest.reduce((a, x) => a + x.o.restHr, 0) / rest.length) + '<small> bpm</small>' : '—', 'nhịp tim nghỉ trung bình')}${Charts.rangeBars(days.map((x, i) => ({ d: x.d, label: dayLabel(range, x.d, i), min: x.o.hrMin, max: x.o.hrMax, avg: x.o.restHr })), { labelEvery: every, title: 'Nhịp tim theo ngày' }) || `<p class="small muted">Health Connect không có nhịp tim trong khoảng này${lastHrDay() ? ' — gần nhất là ' + fmtDate(lastHrDay()) : ''}. Mi Fitness đôi khi không gửi nhịp tim; mở Mi Fitness rồi đồng bộ lại.</p>`}${legend([[Charts.C.hr, 'thấp – cao trong ngày'], ['#fff', 'nhịp nghỉ']])}</div>`;
     if (rest.length > 1) h += `<div class="section-t"><h2>Nhịp tim nghỉ</h2><span class="tiny muted">thấp hơn = hồi phục tốt hơn</span></div><div class="card">${lineChart(rest.map(x => ({ x: x.d, y: x.o.restHr })), 'bpm')}</div>`;
     const hrv = days.filter(x => x.o.hrv);
     if (hrv.length > 1) h += `<div class="section-t"><h2>HRV</h2><span class="tiny muted">cao hơn = hồi phục tốt hơn</span></div><div class="card">${lineChart(hrv.map(x => ({ x: x.d, y: x.o.hrv })), 'ms')}</div>`;
