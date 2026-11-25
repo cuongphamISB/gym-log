@@ -289,3 +289,18 @@ test('ingestMiCloud: sleep with stages+score, resting HR, hourly HR, steps, watc
   // idempotent
   L.ingestMiCloud(db, data); assert.equal(db.health.sessions.length, 1);
 });
+
+test('ingestMiCloud: stages found by overlap when raw night is shifted/split; stages kept across syncs', () => {
+  const db = L.normalizeDB(L.seedDB(SEED));
+  const bed = 1795545000, wake = bed + 6 * 3600;
+  const daily = [{ time: 1795564800, value: JSON.stringify({ sleep_score: 80, segment_details: [{ bedtime: bed, wake_up_time: wake, duration: 350 }] }) }];
+  const raw = [
+    { value: JSON.stringify({ bedtime: bed + 120, wake_up_time: bed + 3 * 3600, items: [{ start_time: bed + 120, end_time: bed + 3600, state: 3 }, { start_time: bed + 3600, end_time: bed + 3 * 3600, state: 2 }] }) },
+    { value: JSON.stringify({ bedtime: bed + 3 * 3600, wake_up_time: wake, items: [{ start_time: bed + 3 * 3600, end_time: wake, state: 4 }] }) },
+  ];
+  L.ingestMiCloud(db, { sleepDaily: daily, sleepRaw: raw });
+  const d = Object.values(db.health.days).find(x => x.sleep);
+  assert.deepEqual(d.sleep.seg.map(s => s[2]), ['l', 'd', 'r']);
+  L.ingestMiCloud(db, { sleepDaily: daily, sleepRaw: [] });   // later sync without raw rows
+  assert.deepEqual(d.sleep.seg.map(s => s[2]), ['l', 'd', 'r']);
+});

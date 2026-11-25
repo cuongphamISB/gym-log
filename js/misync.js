@@ -14,12 +14,14 @@
     const sleepDaily = await safe('sleep', dailyAll('sleep'));
     const hrDaily = await safe('heart_rate', dailyAll('heart_rate'));
     const stepsDaily = await safe('steps', dailyAll('steps'));
+    const spo2Daily = await safe('spo2', dailyAll('spo2'));
     const sleepRaw = await safe('sleep(raw)', client.raw('sleep', from - 86400, now));
     const restRaw = await safe('resting_heart_rate', client.raw('resting_heart_rate', from, now));
     const hrRaw = await safe('heart_rate(raw)', client.raw('heart_rate', hrFrom, now));
+    const spo2Raw = await safe('spo2(raw)', client.raw('spo2', hrFrom, now));
     let sports = [], wm = watermark;
     try { const s = await client.sports(watermark); sports = s.records; wm = s.watermark; } catch (e) { errors.sports = e.message; }
-    return { data: { sleepDaily, sleepRaw, hrDaily, hrRaw, restRaw, stepsDaily, sports }, watermark: wm, errors };
+    return { data: { sleepDaily, sleepRaw, hrDaily, hrRaw, restRaw, stepsDaily, spo2Daily, spo2Raw, sports }, watermark: wm, errors };
   }
 
   // Native HTTP adapter for the Android app (CapacitorHttp). Collects Set-Cookie from the response headers.

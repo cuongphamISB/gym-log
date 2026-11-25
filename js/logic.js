@@ -571,26 +571,45 @@
     const H = db.health || (db.health = { days: {}, sessions: [], lastSync: null });
     const day = d => H.days[d] || (H.days[d] = {});
     const live = rows => (rows || []).filter(r => r && !r.deleted);
-    // raw sleep sessions carry the stage timeline; index them by bedtime
-    const stagesByBed = {};
+    // raw sleep sessions carry the stage timeline. Their bed/wake times need not equal the daily report's
+    // (the device may split a night or shift it by a few minutes), so stages are gathered by time overlap.
+    const rawSleep = [];
     for (const r of live(data.sleepRaw)) {
       const v = miJson(r.value);
-      if (v.bedtime && Array.isArray(v.items) && v.items.length && !stagesByBed[v.bedtime]) stagesByBed[v.bedtime] = { items: v.items, breath: v.avg_breath || null };
+      const items = Array.isArray(v.items) ? v.items.filter(i => i && i.start_time && i.end_time > i.start_time) : [];
+      if (!items.length) continue;
+      const b = v.bedtime || items[0].start_time, w = v.wake_up_time || items[items.length - 1].end_time;
+      rawSleep.push({ b, w, items, breath: v.avg_breath || null });
     }
+    const stagesFor = (b, w) => {
+      const hits = rawSleep.filter(x => Math.min(w, x.w) - Math.max(b, x.b) > 0).sort((x, y) => y.items.length - x.items.length);
+      const out = [];
+      for (const h of hits) for (const i of h.items) {
+        const s0 = Math.max(i.start_time, b), s1 = Math.min(i.end_time, w);
+        if (s1 <= s0) continue;
+        if (out.some(o => Math.min(o[1], s1) - Math.max(o[0], s0) > 30)) continue; // same stretch from another copy
+        out.push([s0, s1, MI_STAGE[i.state] || 'u']);
+      }
+      out.sort((x, y) => x[0] - y[0]);
+      return { seg: out.map(o => [Math.round(o[0] / 60), Math.round(o[1] / 60), o[2]]), breath: (hits[0] && hits[0].breath) || null };
+    };
     let nights = 0;
     for (const r of live(data.sleepDaily)) {
       const v = miJson(r.value), segs = (v.segment_details || []).filter(s => s.bedtime && s.wake_up_time);
       if (!segs.length) continue;
       const main = segs.reduce((a, b) => (b.duration || 0) > (a.duration || 0) ? b : a);
       const naps = segs.filter(s => s !== main);
-      const st = stagesByBed[main.bedtime];
-      const seg = st ? st.items.map(i => [Math.round(i.start_time / 60), Math.round(i.end_time / 60), MI_STAGE[i.state] || 'u']) : [[Math.round(main.bedtime / 60), Math.round(main.wake_up_time / 60), 'u']];
+      const found = stagesFor(main.bedtime, main.wake_up_time);
+      const prev = day(miDay(r.time)).sleep;
+      const st = found.seg.length ? found : null;
+      // keep stages from an earlier sync when this window brought none for the same night
+      const seg = st ? st.seg : prev && prev.src === 'mi' && prev.start === ISO(main.bedtime) && prev.seg && prev.seg.some(x => x[2] !== 'u') ? prev.seg : [[Math.round(main.bedtime / 60), Math.round(main.wake_up_time / 60), 'u']];
       day(miDay(r.time)).sleep = {
         h: round1((main.duration || 0) / 60), inBedH: round1((main.wake_up_time - main.bedtime) / 3600),
         deepMin: main.sleep_deep_duration || 0, lightMin: main.sleep_light_duration || 0, remMin: main.sleep_rem_duration || 0, awakeMin: main.sleep_awake_duration || 0,
         start: ISO(main.bedtime), end: ISO(main.wake_up_time), seg,
         napMin: naps.reduce((a, s) => a + (s.duration || 0), 0), naps: naps.map(s => [Math.round(s.bedtime / 60), Math.round(s.wake_up_time / 60)]),
-        score: v.sleep_score || null, avgHr: main.avg_hr || null, minHr: main.min_hr || null, spo2: v.avg_spo2 || null, breath: st ? st.breath : null, awakeCount: main.awake_count ?? null, src: 'mi',
+        score: v.sleep_score || null, avgHr: main.avg_hr || null, minHr: main.min_hr || null, spo2: v.avg_spo2 || null, breath: st ? st.breath : (prev && prev.breath) || null, awakeCount: main.awake_count ?? null, src: 'mi',
       };
       nights++;
     }
@@ -626,6 +645,14 @@
       if (v.calories !== undefined) o.activeKcal = v.calories;
       if (v.distance !== undefined) o.distanceKm = round1(v.distance / 1000);
     }
+    // SpO2: daily report first, raw readings fill days without one
+    for (const r of live(data.spo2Daily)) {
+      const v = miJson(r.value); if (!v.avg_spo2) continue;
+      day(miDay(r.time)).spo2 = { avg: v.avg_spo2, min: v.min_spo2 || null, max: v.max_spo2 || null };
+    }
+    const spoDays = {};
+    for (const r of live(data.spo2Raw)) { const v = miJson(r.value); if (!v.spo2 || !v.time) continue; (spoDays[localDate(new Date(v.time * 1000))] = spoDays[localDate(new Date(v.time * 1000))] || []).push(v.spo2); }
+    for (const [d, vs] of Object.entries(spoDays)) { const o = day(d); if (!o.spo2) o.spo2 = { avg: Math.round(vs.reduce((a, b) => a + b, 0) / vs.length), min: Math.min(...vs), max: Math.max(...vs), n: vs.length }; }
     // workouts recorded on the watch
     hrPts.sort((a, b) => a[0] - b[0]);
     let sessions = 0;

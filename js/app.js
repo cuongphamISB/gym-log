@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const L = self.L, Store = self.Store, Coach = self.Coach, SEED = self.SEED;
-  const VERSION = '1.5.0';
+  const VERSION = '1.6.0';
 
   // ---------- helpers ----------
   const $ = s => document.querySelector(s);
@@ -662,8 +662,9 @@
     if (range === 'day') {
       const o = days[0].o;
       const items = [...Array(24)].map((_, hr) => { const v = o.hrH && o.hrH[hr]; return { label: hr % 6 === 0 ? String(hr) : '', min: v && v[0], max: v && v[1], avg: v && v[2] }; });
-      if (!o.hrH && !o.restHr) return `<div class="card empty"><b>Không có dữ liệu nhịp tim</b>Health Connect chưa có nhịp tim ngày này. Mi Fitness không phải lúc nào cũng gửi nhịp tim — mở Mi Fitness rồi đồng bộ lại.</div>`;
+      if (!o.hrH && !o.restHr && !o.spo2) return `<div class="card empty"><b>Không có dữ liệu nhịp tim</b>Health Connect chưa có nhịp tim ngày này. Mi Fitness không phải lúc nào cũng gửi nhịp tim — mở Mi Fitness rồi đồng bộ lại.</div>`;
       h += `<div class="card">${bigStat(o.hrMin ? `${o.hrMin}–${o.hrMax}<small> bpm</small>` : '—', [o.restHr && `nghỉ ${o.restHr} bpm`, o.hrv && `HRV ${o.hrv} ms`].filter(Boolean).join(' · '))}${Charts.rangeBars(items, { title: 'Nhịp tim theo giờ', line: o.restHr })}${legend([[Charts.C.hr, 'thấp nhất – cao nhất'], ['#fff', 'trung bình'], [Charts.C.hrv, o.restHrEst ? 'nhịp nghỉ (ước tính)' : 'nhịp tim nghỉ']])}</div>`;
+      if (o.spo2 || (o.sleep && o.sleep.spo2)) h += `<div class="card small"><div class="between"><span>SpO2</span><b class="num">${o.spo2 ? `TB ${o.spo2.avg}%${o.spo2.min ? ' · thấp ' + o.spo2.min + '%' : ''}` : ''}${o.sleep && o.sleep.spo2 ? `${o.spo2 ? ' · ' : ''}khi ngủ ${o.sleep.spo2}%` : ''}</b></div></div>`;
       const ws = L.finished(db).filter(w => w.date === days[0].d && w.avgHr);
       if (ws.length) h += `<div class="card small">${ws.map(w => `<div class="between"><span>${esc(w.name)}</span><b>${w.avgHr} TB${w.maxHr ? ' · ' + w.maxHr + ' max' : ''}</b></div>`).join('')}</div>`;
       return h;
@@ -672,6 +673,8 @@
     const rest = days.filter(x => x.o.restHr);
     h += `<div class="card">${bigStat(rest.length ? Math.round(rest.reduce((a, x) => a + x.o.restHr, 0) / rest.length) + '<small> bpm</small>' : '—', 'nhịp tim nghỉ trung bình')}${Charts.rangeBars(days.map((x, i) => ({ d: x.d, label: dayLabel(range, x.d, i), min: x.o.hrMin, max: x.o.hrMax, avg: x.o.restHr })), { labelEvery: every, title: 'Nhịp tim theo ngày' }) || `<p class="small muted">Health Connect không có nhịp tim trong khoảng này${lastHrDay() ? ' — gần nhất là ' + fmtDate(lastHrDay()) : ''}. Mi Fitness đôi khi không gửi nhịp tim; mở Mi Fitness rồi đồng bộ lại.</p>`}${legend([[Charts.C.hr, 'thấp – cao trong ngày'], ['#fff', 'nhịp nghỉ']])}</div>`;
     if (rest.length > 1) h += `<div class="section-t"><h2>Nhịp tim nghỉ</h2><span class="tiny muted">thấp hơn = hồi phục tốt hơn</span></div><div class="card">${lineChart(rest.map(x => ({ x: x.d, y: x.o.restHr })), 'bpm')}</div>`;
+    const sp = days.filter(x => (x.o.spo2 && x.o.spo2.avg) || (x.o.sleep && x.o.sleep.spo2));
+    if (sp.length > 1) h += `<div class="section-t"><h2>SpO2</h2><span class="tiny muted">bình thường ≥ 95%</span></div><div class="card">${lineChart(sp.map(x => ({ x: x.d, y: (x.o.spo2 && x.o.spo2.avg) || x.o.sleep.spo2 })), '%')}</div>`;
     const hrv = days.filter(x => x.o.hrv);
     if (hrv.length > 1) h += `<div class="section-t"><h2>HRV</h2><span class="tiny muted">cao hơn = hồi phục tốt hơn</span></div><div class="card">${lineChart(hrv.map(x => ({ x: x.d, y: x.o.hrv })), 'ms')}</div>`;
     return h;
