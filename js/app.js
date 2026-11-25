@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const L = self.L, Store = self.Store, Coach = self.Coach, SEED = self.SEED;
-  const VERSION = '1.9.0';
+  const VERSION = '1.9.1';
 
   // ---------- helpers ----------
   const $ = s => document.querySelector(s);
@@ -1355,9 +1355,10 @@
     if (t.id === 'aiProv') { const p = Coach.PRESETS[t.value]; $('#aiUrl').value = p.baseUrl; $('#aiModel').value = p.model; }
   });
   // select-all on focus makes overwriting numbers one tap
-  document.addEventListener('focusin', e => { if (e.target.matches('.sets input')) setTimeout(() => e.target.select(), 0); });
+  document.addEventListener('focusin', e => { if (e.target.matches('.sets input, .dval input')) setTimeout(() => e.target.select(), 0); });
   // Enter on a set row jumps to the next input
   document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.matches('.dval input')) { e.preventDefault(); e.target.blur(); return; }
     if (e.key !== 'Enter' || !e.target.matches('.sets input')) return;
     e.preventDefault();
     const all = [...document.querySelectorAll('.sets input')];
