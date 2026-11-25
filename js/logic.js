@@ -227,6 +227,36 @@
   const isDumbbellName = n => /\bDB\b|dumbbell|tạ đơn|goblet|lateral|curl|fly|one-arm|lunge|split squat|calf/i.test(n || '');
   function ownedDumbbells(db) { return ((db.settings && db.settings.dumbbells) || []).map(num).filter(v => v > 0).sort((a, b) => a - b); }
 
+  // One-time move to program v2: replace a template only if it is still the original GPT list; log weights per dumbbell.
+  function migrateProgramV2(db, v1, v2, today = localDate()) {
+    db.migrations = db.migrations || {};
+    const out = { templates: [], renamed: 0, kgFixed: 0 };
+    if (!db.migrations.programV2 && v1 && v2) {
+      for (const t of db.templates) {
+        const ids = t.items.map(i => i.exerciseId);
+        if (v2.templates[t.id] && v1[t.id] && ids.join() === v1[t.id].join()) {
+          t.items = v2.templates[t.id].map(i => Object.assign({}, i)); t.note = v2.notes[t.id] || t.note; out.templates.push(t.name);
+        }
+      }
+      for (const [id, name] of Object.entries(v2.renames || {})) { const e = db.exercises.find(x => x.id === id); if (e && !e.custom && e.name !== name) { e.name = name; out.renamed++; } }
+      db.migrations.programV2 = today;
+    }
+    // 2026-11-11 Strength B logged RDL / incline press as the total of both dumbbells (user confirmed): store per dumbbell
+    if (!db.migrations.kgPerDb1111) {
+      for (const w of db.workouts) {
+        if (w.date !== '2026-11-11') continue;
+        for (const it of w.items) {
+          if (!['strength-b-0', 'strength-b-1'].includes(it.exerciseId)) continue;
+          if (!it.sets.some(s => num(s.kg) >= 40)) continue;
+          for (const s of it.sets) if (num(s.kg)) { s.kg = String(round1(num(s.kg) / 2)); out.kgFixed++; }
+          it.note = (it.note ? it.note + ' · ' : '') + 'kg/quả (đã quy từ tổng 2 quả)';
+        }
+      }
+      db.migrations.kgPerDb1111 = today;
+    }
+    return out;
+  }
+
   // A/B/C rotation: the strength template trained least recently (scheduled day wins when set)
   function nextTemplate(db, date = localDate()) {
     const dow = parseDate(date).getDay();
@@ -809,7 +839,7 @@
     emptyDB, seedDB, mergeSeed, normalizeDB, newWorkout, newItem, isDone, isWork, setReps, e1rm, setVolume, setFilled, describeSet,
     finished, sortedDesc, exerciseHistory, lastPerformance, bests, detectPR, suggestion, workoutStats, durationOf,
     muscleSetsByWeek, e1rmSeries, streakWeeks, CSV_COLS, toCSV, backupJSON, summaryText, parseBackup, importLegacyV4, mergeWorkouts,
-    nextTemplate, ownedDumbbells, isDumbbellName,
+    nextTemplate, ownedDumbbells, isDumbbellName, migrateProgramV2,
     sleepByNight, ingestHealth, ingestMiCloud, matchSession, fillFromHealth, readiness, median, HR_ZONES, maxHrFor, zoneOf, zoneMinutes,
     GOALS, latestWeight, bmr, tdee, weightTrend, nutritionTargets, intake, DAILY_COLS, toDailyCSV,
   };

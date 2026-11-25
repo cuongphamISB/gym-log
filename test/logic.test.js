@@ -350,3 +350,22 @@ test('nextTemplate picks the strength template trained least recently', () => {
   mk('strength-a', '2026-11-10'); mk('strength-b', '2026-11-12'); mk('outdoor', '2026-11-14'); mk('strength-c', '2026-11-15');
   assert.equal(L.nextTemplate(db, '2026-11-18').due.id, 'strength-a');
 });
+
+test('program v2: replaces only untouched GPT templates, adds exercises, halves the 11/11 totals once', () => {
+  const vm = require('vm');
+  const ctx = { self: {} }; ctx.self.SEED = JSON.parse(JSON.stringify(SEED));
+  vm.runInNewContext(require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'program.js'), 'utf8'), ctx);
+  const db = L.normalizeDB(L.seedDB(SEED));               // old v1 templates as on the phone
+  db.templates.find(t => t.id === 'strength-c').items.pop(); // user edited C: must stay untouched
+  L.mergeSeed(db, ctx.self.SEED);
+  assert.ok(db.exercises.some(e => e.id === 'x-csrow'));
+  const w = doneWorkout(db, '2026-11-11', 'strength-b-0', [{ kg: 40, reps: 12 }, { kg: '80', reps: 8 }]);
+  const r = L.migrateProgramV2(db, ctx.self.PROGRAM_V1, ctx.self.PROGRAM_V2, '2026-11-25');
+  assert.deepEqual(r.templates.sort(), ['Outdoor / PowerBand', 'Strength A', 'Strength B']);
+  assert.equal(db.templates.find(t => t.id === 'strength-b').items[1].exerciseId, 'x-csrow');
+  assert.equal(db.templates.find(t => t.id === 'strength-c').items.length, 4);
+  assert.deepEqual(w.items[0].sets.map(s => +s.kg), [20, 40]);
+  const again = L.migrateProgramV2(db, ctx.self.PROGRAM_V1, ctx.self.PROGRAM_V2);
+  assert.equal(again.kgFixed, 0); assert.deepEqual(w.items[0].sets.map(s => +s.kg), [20, 40]);
+  assert.equal(db.exercises.find(e => e.id === 'strength-b-0').name, 'Romanian Deadlift (tạ đơn)');
+});

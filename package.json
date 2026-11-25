@@ -1,6 +1,6 @@
 {
   "name": "gym-log",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "private": true,
   "description": "Offline gym workout logger (PWA + Android app with Health Connect)",
   "scripts": {

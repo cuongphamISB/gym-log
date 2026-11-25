@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const L = self.L, Store = self.Store, Coach = self.Coach, SEED = self.SEED;
-  const VERSION = '1.7.0';
+  const VERSION = '1.8.0';
 
   // ---------- helpers ----------
   const $ = s => document.querySelector(s);
@@ -406,7 +406,7 @@
     let h = `<div class="ex" id="it-${it.id}"><div class="ex-h">${thumb(ex)}<div class="grow"><b>${esc(it.name)}</b><span class="small muted">${esc(tgt)}${last ? ` · lần trước ${fmtDate(last.workout.date)}` : ''}</span></div>
       <div class="ex-tools"><button data-act="open" data-page="exercise" data-id="${it.exerciseId}" aria-label="Hướng dẫn">${I.info}</button><button data-act="moveItem" data-id="${w.id}" data-i="${idx}" data-d="-1" aria-label="Lên">${I.up}</button><button data-act="moveItem" data-id="${w.id}" data-i="${idx}" data-d="1" aria-label="Xuống">${I.down}</button><button data-act="rmItem" data-id="${w.id}" data-i="${idx}" aria-label="Xoá bài">${I.x}</button></div></div>`;
     if (sug && sug.text) h += `<div class="hint ${sug.up ? 'up' : ''}">${sug.up ? '↑ ' : '💡 '}${esc(sug.text)}</div>`;
-    h += `<table class="sets"><thead><tr><th class="idx">#</th><th>Trước</th>${cols.map(c => `<th>${c[1]}</th>`).join('')}<th class="ok"></th></tr></thead><tbody>`;
+    h += `<table class="sets"><thead><tr><th class="idx">#</th><th>Trước</th>${cols.map(c => `<th>${c[0] === 'kg' && it.type !== 'bodyweight' && it.type !== 'timed' && L.isDumbbellName(it.name) ? 'kg/quả' : c[1]}</th>`).join('')}<th class="ok"></th></tr></thead><tbody>`;
     it.sets.forEach((s, i) => {
       const { ph, lastSet } = placeholders(w, it, i, last, sug);
       const n = it.sets.slice(0, i + 1).filter(x => !x.warmup).length;
@@ -1133,7 +1133,7 @@
     if (!window.HealthSync || !HealthSync.isNative() || ui.hcBusy) return;
     if (!db.settings.hcConnected) { if (miOn()) await miSync(manual); return; }
     if (!manual && db.health && db.health.lastSync && (db.health.v || 1) >= 3) {
-      const hr = new Date().getHours(), missing = !(db.health.days[L.localDate()] || {}).sleep;
+      const tdS = (db.health.days[L.localDate()] || {}).sleep, hr = new Date().getHours(), missing = !tdS || !(tdS.seg || []).some(x => x[2] !== 'u');
       const wait = missing && hr >= 4 && hr < 15 ? 3 * 60e3 : 15 * 60e3;
       if (Date.now() - new Date(db.health.lastSync) < wait) return;
     }
@@ -1311,6 +1311,8 @@
     try { saved = await Store.load(); aiKey = (await Store.get('aiKey')) || ''; miSession = (await Store.get('miSession')) || null; }
     catch (e) { $('#app').innerHTML = `<div class="notice" style="margin-top:20px">Không mở được bộ nhớ của trình duyệt (${esc(e.message)}). Đừng dùng tab ẩn danh.</div>`; return; }
     db = saved ? L.mergeSeed(L.normalizeDB(saved), SEED) : L.seedDB(SEED);
+    const mig = L.migrateProgramV2(db, self.PROGRAM_V1, self.PROGRAM_V2);
+    if (mig.templates.length || mig.kgFixed) setTimeout(() => toast(`Đã cập nhật giáo án v2${mig.templates.length ? ' (' + mig.templates.length + ' buổi)' : ''}${mig.kgFixed ? ' · quy ' + mig.kgFixed + ' hiệp về kg/quả' : ''}`), 600);
     history.replaceState({ depth: 0 }, '');
     const act = activeWorkout();
     render();
