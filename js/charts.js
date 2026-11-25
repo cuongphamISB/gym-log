@@ -22,6 +22,11 @@
     const X = t => L + (t - t0) / Math.max(1, t1 - t0) * (W - L - R);
     const lanes = ['a', 'r', 'l', 'd'];
     const hasStages = seg.some(s => s[2] !== 'u');
+    if (!hasStages) {
+      // no stage timeline yet: one honest bar for the time asleep, no fake lanes
+      const b0 = L + 0, b1 = W - R;
+      return svg(W, 70, `<rect x="${b0}" y="10" width="${b1 - b0}" height="26" rx="8" fill="${C.sleep.u}" opacity=".55"/>` + txt(b0, 58, hm(t0)) + txt(b1, 58, hm(t1), 'end') + txt((b0 + b1) / 2, 28, 'chưa có chi tiết giai đoạn', 'middle', 'fill="#eef1f5"'), 'Giấc ngủ');
+    }
     const laneH = (H - T - B) / (hasStages ? 4 : 1);
     let body = '';
     if (hasStages) lanes.forEach((k, i) => { body += `<line x1="${L}" x2="${W - R}" y1="${fx(T + laneH * (i + 1))}" y2="${fx(T + laneH * (i + 1))}" stroke="${C.grid}"/>`; });

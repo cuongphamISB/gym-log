@@ -147,7 +147,9 @@
       const s = this.s;
       const r = await this.http({ method: 'GET', url: `${regionHost(s.region)}${path}?${qs(params)}`, headers: { Cookie: cookieHeader({ serviceToken: s.serviceToken, cUserId: s.cUserId, userId: s.userId, locale: s.locale }), region_tag: s.region } });
       if (r.status === 401 && !retried && s.passToken) {
-        this.s = await renew(this.http, s); await this.onSession(this.s);
+        if (this.dead) throw Object.assign(new Error('Phiên Xiaomi hết hạn, cần đăng nhập lại'), { relogin: true });
+        try { this.s = await renew(this.http, s); } catch (e) { this.dead = true; throw Object.assign(new Error('Phiên Xiaomi hết hạn, cần đăng nhập lại (' + e.message + ')'), { relogin: true }); }
+        await this.onSession(this.s);
         return this.call(endpoint, data, true);
       }
       if (r.status < 200 || r.status >= 300) throw Object.assign(new Error(`Mi cloud ${endpoint}: HTTP ${r.status}`), { status: r.status });

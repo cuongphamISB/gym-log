@@ -304,3 +304,49 @@ test('ingestMiCloud: stages found by overlap when raw night is shifted/split; st
   L.ingestMiCloud(db, { sleepDaily: daily, sleepRaw: [] });   // later sync without raw rows
   assert.deepEqual(d.sleep.seg.map(s => s[2]), ['l', 'd', 'r']);
 });
+
+test('Health Connect fills stages for a Mi night without them; HC workouts never duplicate Mi ones', () => {
+  const db = L.normalizeDB(L.seedDB(SEED));
+  const bed = 1795544400, wake = 1795572840;
+  L.ingestMiCloud(db, { sleepDaily: [{ time: 1795564800, value: JSON.stringify({ sleep_score: 90, segment_details: [{ bedtime: bed, wake_up_time: wake, duration: 474 }] }) }], sleepRaw: [],
+    sports: [{ sid: 's', value: JSON.stringify({ start_time: 1795500000, end_time: 1795503600, avg_hrm: 120 }) }] });
+  const d = Object.values(db.health.days).find(x => x.sleep);
+  assert.deepEqual(d.sleep.seg.map(x => x[2]), ['u']);
+  const iso = t => new Date(t * 1000).toISOString();
+  L.ingestHealth(db, { sleep: [{ startDate: iso(bed), endDate: iso(wake), hasStageData: true, stages: [
+    { stage: 'light', startDate: iso(bed), endDate: iso(bed + 3600), durationMinutes: 60 }, { stage: 'deep', startDate: iso(bed + 3600), endDate: iso(wake), durationMinutes: 414 }] }],
+    workouts: [{ platformId: 'hc', startDate: iso(1795500060), endDate: iso(1795503500), duration: 3440, hrSeries: [[0, 100], [30, 110]] }] });
+  assert.equal(d.sleep.score, 90);                       // Mi totals kept
+  assert.deepEqual(d.sleep.seg.map(x => x[2]), ['l', 'd']); // HC stages used
+  assert.equal(db.health.sessions.length, 1);              // no duplicate
+  assert.equal(db.health.sessions[0].hr.length, 2);        // HC HR curve copied onto the Mi session
+  // next Mi sync without raw keeps the HC stages
+  L.ingestMiCloud(db, { sleepDaily: [{ time: 1795564800, value: JSON.stringify({ sleep_score: 90, segment_details: [{ bedtime: bed, wake_up_time: wake, duration: 474 }] }) }], sleepRaw: [] });
+  assert.deepEqual(d.sleep.seg.map(x => x[2]), ['l', 'd']);
+});
+
+test('progression v2: owned dumbbells, big jumps, RIR 0 grinding', () => {
+  const db = L.normalizeDB(L.seedDB(SEED));
+  db.settings.dumbbells = [4, 6, 8, 12];
+  const ex = db.exercises.find(e => e.id === 'strength-c-2'); // DB Shoulder Press 8-12
+  const tpl = db.templates.find(t => t.id === 'strength-c').items.find(i => i.exerciseId === ex.id);
+  const it = L.newItem(db, ex, tpl);
+  doneWorkout(db, '2026-11-13', ex.id, [{ kg: 6, reps: 12, rir: 2 }, { kg: 6, reps: 12, rir: 2 }]);
+  assert.equal(L.suggestion(db, it, null, 1).kg, 8);              // next owned dumbbell, not 7
+  doneWorkout(db, '2026-11-15', ex.id, [{ kg: 8, reps: 12, rir: 1 }, { kg: 8, reps: 12, rir: 2 }]);
+  const s = L.suggestion(db, it, null, 1);                          // 8 -> 12 is +50%: grow reps first
+  assert.equal(s.kg, 8); assert.match(s.text, /nhảy quá lớn/);
+  doneWorkout(db, '2026-11-17', ex.id, [{ kg: 8, reps: 12, rir: 0 }, { kg: 8, reps: 12, rir: 1 }]);
+  assert.match(L.suggestion(db, it, null, 1).text, /RIR 0/);        // ground out: hold the weight
+  // barbell-type lift is not snapped to dumbbells
+  const rdl = db.exercises.find(e => e.id === 'strength-b-0');
+  doneWorkout(db, '2026-11-18', rdl.id, [{ kg: 80, reps: 12, rir: 2 }, { kg: 80, reps: 12, rir: 2 }]);
+  assert.equal(L.suggestion(db, L.newItem(db, rdl, db.templates[1].items[0]), null, 2.5).kg, 82.5);
+});
+
+test('nextTemplate picks the strength template trained least recently', () => {
+  const db = L.normalizeDB(L.seedDB(SEED));
+  const mk = (id, date) => { const w = L.newWorkout(db, db.templates.find(t => t.id === id), date); w.status = 'done'; db.workouts.push(w); };
+  mk('strength-a', '2026-11-10'); mk('strength-b', '2026-11-12'); mk('outdoor', '2026-11-14'); mk('strength-c', '2026-11-15');
+  assert.equal(L.nextTemplate(db, '2026-11-18').due.id, 'strength-a');
+});

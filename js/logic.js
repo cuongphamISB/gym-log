@@ -38,7 +38,7 @@
     };
   }
   function defaultSettings() {
-    return { kgStep: 1, autoRest: true, sound: true, vibrate: true, lastBackupAt: null, createdAt: new Date().toISOString() };
+    return { kgStep: 1, autoRest: true, restNotify: true, dumbbells: [], sound: true, vibrate: true, lastBackupAt: null, createdAt: new Date().toISOString() };
   }
   function seedDB(seed) {
     const db = emptyDB();
@@ -200,16 +200,41 @@
     const topKg = Math.max(...work.map(s => num(s.kg) || 0));
     const minR = Math.min(...reps);
     if (!repHigh) return { text: `Lần trước: ${work.map(s => describeSet(s, type)).join(', ')}` };
+    // RIR 0 on the top sets = the rep target was reached by grinding: repeat the weight first
+    const rirs = work.map(s => num(s.rir)).filter(v => v !== null);
+    const grinding = rirs.length && Math.min(...rirs) <= 0;
+    if (minR >= repHigh && grinding) return { text: `Đạt ${repHigh} reps nhưng có hiệp RIR 0 → giữ ${topKg ? topKg + 'kg' : 'mức cũ'}, lần này để dư 1–2 reps`, kg: topKg || null, reps: repHigh };
     if (minR >= repHigh) {
       if (type === 'weight' || type === 'unilateral') {
-        const step = type === 'unilateral' || /DB|dumbbell/i.test(item.name) ? Math.max(kgStep, 1) : kgStep;
-        return { text: `Đạt ${repHigh} reps mọi hiệp → tăng lên ${round1(topKg + step)}kg, về ${repLow || repHigh} reps`, kg: round1(topKg + step), reps: repLow, up: true };
+        const isDb = type === 'unilateral' || isDumbbellName(item.name);
+        const owned = isDb ? ownedDumbbells(db) : [];
+        let next = round1(topKg + (isDb ? Math.max(kgStep, 1) : kgStep));
+        if (owned.length) {
+          const up = owned.filter(k => k > topKg);
+          if (!up.length) return { text: `Đã dùng quả nặng nhất (${topKg}kg) → tăng reps lên ${repHigh + 3}–${repHigh + 8} hoặc thêm 1 hiệp`, kg: topKg, reps: repHigh + 2, up: true };
+          next = up[0];
+          if (next - topKg > Math.max(2.5, topKg * 0.15)) return { text: `Quả kế tiếp ${next}kg nhảy quá lớn (+${Math.round((next - topKg) / topKg * 100)}%) → giữ ${topKg}kg, lên ${repHigh + 2}–${repHigh + 5} reps trước`, kg: topKg, reps: repHigh + 2, up: true };
+        }
+        return { text: `Đạt ${repHigh} reps mọi hiệp → tăng lên ${next}kg, về ${repLow || repHigh} reps`, kg: next, reps: repLow, up: true };
       }
       if (type === 'band') return { text: `Đạt ${repHigh} reps mọi hiệp → đổi dây nặng hơn`, up: true };
       return { text: `Đạt ${repHigh} reps mọi hiệp → thêm tạ/biến thể khó hơn`, up: true };
     }
     if (repLow && minR < repLow) return { text: `Có hiệp dưới ${repLow} reps → giữ ${topKg ? topKg + 'kg' : 'mức cũ'}, ưu tiên đủ reps`, kg: topKg || null };
     return { text: `Giữ ${topKg ? topKg + 'kg' : 'mức cũ'}, cố thêm 1 rep (mục tiêu ${repHigh})`, kg: topKg || null, reps: Math.min(repHigh, minR + 1) };
+  }
+
+  const isDumbbellName = n => /\bDB\b|dumbbell|tạ đơn|goblet|lateral|curl|fly|one-arm|lunge|split squat|calf/i.test(n || '');
+  function ownedDumbbells(db) { return ((db.settings && db.settings.dumbbells) || []).map(num).filter(v => v > 0).sort((a, b) => a - b); }
+
+  // A/B/C rotation: the strength template trained least recently (scheduled day wins when set)
+  function nextTemplate(db, date = localDate()) {
+    const dow = parseDate(date).getDay();
+    const scheduled = db.templates.find(t => (t.days || []).includes(dow));
+    const last = id => { const w = sortedDesc(finished(db)).find(x => x.templateId === id); return w ? w.date : ''; };
+    const strength = db.templates.filter(t => t.items.some(i => { const e = (db.exercises.find(x => x.id === i.exerciseId) || {}); return e.type && e.type !== 'cardio' && e.type !== 'info'; }));
+    const due = [...strength].sort((a, b) => last(a.id).localeCompare(last(b.id)))[0] || null;
+    return { scheduled, due, lastOf: last };
   }
 
   function workoutStats(w) {
@@ -460,7 +485,16 @@
     const day = d => H.days[d] || (H.days[d] = {});
     const nights = sleepByNight(raw.sleep);
     for (const [d, n] of Object.entries(nights)) {
-      if (day(d).sleep && day(d).sleep.src === 'mi') continue;
+      const cur = day(d).sleep;
+      if (cur && cur.src === 'mi') {
+        const hasStages = n.seg.some(x => x[2] !== 'u'), curStages = cur.seg && cur.seg.some(x => x[2] !== 'u');
+        const a0 = Math.round(new Date(cur.start) / 60000), a1 = Math.round(new Date(cur.end) / 60000);
+        if (hasStages && !curStages) {
+          const clip = n.seg.filter(x => Math.min(x[1], a1) - Math.max(x[0], a0) > 0).map(x => [Math.max(x[0], a0), Math.min(x[1], a1), x[2]]);
+          if (clip.length) { cur.seg = clip; cur.segSrc = 'hc'; }
+        }
+        continue;
+      }
       day(d).sleep = { h: round1(n.asleepMin / 60), inBedH: round1(n.inBedMin / 60), deepMin: Math.round(n.deepMin), remMin: Math.round(n.remMin), lightMin: Math.round(n.lightMin), awakeMin: Math.round(n.awakeMin), start: n.start, end: n.end, seg: n.seg.sort((a, b) => a[0] - b[0]), napMin: n.napMin || 0, naps: n.naps || [] };
     }
     const agg = (arr, key) => { for (const s of arr || []) { const v = s.value; if (v === null || v === undefined || !Number.isFinite(v)) continue; const o = day(localDate(new Date(s.startDate))); if (o.actSrc === 'mi') continue; o[key] = Math.round(v); } };
@@ -500,6 +534,9 @@
       else if (cur.src === 'hc') cur.kg = kg; // never overwrite a manual entry
     }
     for (const w of raw.workouts || []) {
+      const w0 = +new Date(w.startDate), w1 = +new Date(w.endDate);
+      const mi = H.sessions.find(x => x.src === 'mi' && Math.min(w1, +new Date(x.end)) - Math.max(w0, +new Date(x.start)) >= 0.5 * Math.max(1, w1 - w0));
+      if (mi) { if (!mi.hr && w.hrSeries && w.hrSeries.length) mi.hr = w.hrSeries; continue; }
       const id = w.platformId || w.startDate;
       const rec = {
         id, type: w.workoutType, start: w.startDate, end: w.endDate, durationMin: Math.round((w.duration || 0) / 60),
@@ -546,9 +583,10 @@
     const days = (db.health && db.health.days) || {};
     const d = days[date] || {};
     const prev = [...Array(14)].map((_, i) => days[addDays(date, -i - 1)] || {});
-    const rBase = median(prev.map(x => x.restHr)), hBase = median(prev.map(x => x.hrv));
+    const realRest = x => (x.restHrEst ? null : x.restHr);
+    const rBase = median(prev.map(realRest)), hBase = median(prev.map(x => x.hrv));
     const sleepH = d.sleep ? d.sleep.h : null;
-    const rhrDelta = d.restHr && rBase ? d.restHr - rBase : null;
+    const rhrDelta = realRest(d) && rBase ? Math.round(d.restHr - rBase) : null;
     const hrvDelta = d.hrv && hBase ? Math.round((d.hrv - hBase) / hBase * 100) : null;
     if (sleepH === null && rhrDelta === null && hrvDelta === null) return null;
     let score = 0; const why = [];
@@ -603,13 +641,16 @@
       const prev = day(miDay(r.time)).sleep;
       const st = found.seg.length ? found : null;
       // keep stages from an earlier sync when this window brought none for the same night
-      const seg = st ? st.seg : prev && prev.src === 'mi' && prev.start === ISO(main.bedtime) && prev.seg && prev.seg.some(x => x[2] !== 'u') ? prev.seg : [[Math.round(main.bedtime / 60), Math.round(main.wake_up_time / 60), 'u']];
+      const b0 = Math.round(main.bedtime / 60), b1 = Math.round(main.wake_up_time / 60);
+      const prevOk = prev && prev.seg && prev.seg.some(x => x[2] !== 'u') && prev.seg.some(x => Math.min(x[1], b1) - Math.max(x[0], b0) > 0);
+      const seg = st ? st.seg : prevOk ? prev.seg : [[b0, b1, 'u']];
+      const segSrc = st ? 'mi' : prevOk ? (prev.segSrc || (prev.src === 'mi' ? 'mi' : 'hc')) : null;
       day(miDay(r.time)).sleep = {
         h: round1((main.duration || 0) / 60), inBedH: round1((main.wake_up_time - main.bedtime) / 3600),
         deepMin: main.sleep_deep_duration || 0, lightMin: main.sleep_light_duration || 0, remMin: main.sleep_rem_duration || 0, awakeMin: main.sleep_awake_duration || 0,
         start: ISO(main.bedtime), end: ISO(main.wake_up_time), seg,
         napMin: naps.reduce((a, s) => a + (s.duration || 0), 0), naps: naps.map(s => [Math.round(s.bedtime / 60), Math.round(s.wake_up_time / 60)]),
-        score: v.sleep_score || null, avgHr: main.avg_hr || null, minHr: main.min_hr || null, spo2: v.avg_spo2 || null, breath: st ? st.breath : (prev && prev.breath) || null, awakeCount: main.awake_count ?? null, src: 'mi',
+        score: v.sleep_score || null, avgHr: main.avg_hr || null, minHr: main.min_hr || null, spo2: v.avg_spo2 || null, breath: st ? st.breath : (prev && prev.breath) || null, awakeCount: main.awake_count ?? null, src: 'mi', segSrc,
       };
       nights++;
     }
@@ -768,6 +809,7 @@
     emptyDB, seedDB, mergeSeed, normalizeDB, newWorkout, newItem, isDone, isWork, setReps, e1rm, setVolume, setFilled, describeSet,
     finished, sortedDesc, exerciseHistory, lastPerformance, bests, detectPR, suggestion, workoutStats, durationOf,
     muscleSetsByWeek, e1rmSeries, streakWeeks, CSV_COLS, toCSV, backupJSON, summaryText, parseBackup, importLegacyV4, mergeWorkouts,
+    nextTemplate, ownedDumbbells, isDumbbellName,
     sleepByNight, ingestHealth, ingestMiCloud, matchSession, fillFromHealth, readiness, median, HR_ZONES, maxHrFor, zoneOf, zoneMinutes,
     GOALS, latestWeight, bmr, tdee, weightTrend, nutritionTargets, intake, DAILY_COLS, toDailyCSV,
   };

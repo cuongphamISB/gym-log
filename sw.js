@@ -1,5 +1,5 @@
 // Offline-first app shell. Bump VERSION on every deploy.
-const VERSION = 'gymlog-v1.6.0';
+const VERSION = 'gymlog-v1.7.0';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/logic.js', 'js/seed.js', 'js/store.js', 'js/coach.js', 'js/health.js', 'js/micloud.js', 'js/misync.js', 'js/charts.js', 'js/app.js',
