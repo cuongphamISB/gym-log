@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const L = self.L, Store = self.Store, Coach = self.Coach, SEED = self.SEED;
-  const VERSION = '1.8.0';
+  const VERSION = '1.9.0';
 
   // ---------- helpers ----------
   const $ = s => document.querySelector(s);
@@ -42,7 +42,7 @@
   // ---------- state ----------
   let db = null, aiKey = '', persisted = null, installEvt = null, miSession = null;
   const miOn = () => !!(miSession && window.MiSync && MiSync.capacitorHttp());
-  const ui = { openItems: {}, scrollMem: {}, tabScroll: {}, tab: 'today', stack: [], sleep: null, libSeg: 'ex', libQ: '', pickQ: '', progEx: null, coachBusy: false, coachResult: null };
+  const ui = { dock: null, lastRir: {}, openItems: {}, scrollMem: {}, tabScroll: {}, tab: 'today', stack: [], sleep: null, libSeg: 'ex', libQ: '', pickQ: '', progEx: null, coachBusy: false, coachResult: null };
   let rest = null; // {endAt,total,label,alerted}
   let wakeLock = null, audioCtx = null;
   const save = () => Store.saveSoon(db);
@@ -362,8 +362,64 @@
     w.items.forEach((it, idx) => { h += itemCard(w, it, idx); });
     h += `<button class="btn wide" data-act="pick" data-mode="workout" data-id="${w.id}">+ Thêm bài tập</button>`;
     if (!editing) h += `<button class="btn ghost danger wide" style="margin-top:10px" data-act="discard" data-id="${w.id}">Huỷ buổi này</button>`;
+    if (!editing) h += `<div style="height:200px"></div>` + dockHtml(w);
     return h;
   };
+
+  // ---------- one-tap logging dock ----------
+  function currentSet(w) {
+    if (!w) return null;
+    for (const it of w.items) { if (it.type === 'info') continue; const i = it.sets.findIndex(s => !s.done); if (i >= 0) return { it, i }; }
+    return null;
+  }
+  function isDbItem(it) { return it.type === 'unilateral' || L.isDumbbellName(it.name); }
+  function stepKg(it, kg, dir) {
+    const v = L.num(kg) || 0;
+    const owned = isDbItem(it) && it.type !== 'bodyweight' ? L.ownedDumbbells(db) : [];
+    if (owned.length) {
+      if (dir > 0) { const up = owned.find(k => k > v); return up !== undefined ? up : v; }
+      const dn = owned.filter(k => k < v); return dn.length ? dn[dn.length - 1] : 0;
+    }
+    const step = it.type === 'bodyweight' ? 2.5 : (db.settings.kgStep || 1);
+    return Math.max(0, L.round1(v + dir * step));
+  }
+  function dockInit(w, cur) {
+    const { it, i } = cur, s = it.sets[i];
+    const key = it.id + ':' + i;
+    if (ui.dock && ui.dock.key === key) return ui.dock;
+    const last = L.lastPerformance(db, it.exerciseId, w.id);
+    const sug = L.suggestion(db, it, w.id, db.settings.kgStep);
+    const { ph, lastSet } = placeholders(w, it, i, last, sug);
+    const pick = f => { const own = L.num(s[f]); if (own !== null) return own; const p = L.num(ph[f]); return p; };
+    const tg = it.target || {};
+    ui.dock = {
+      key, kg: pick('kg'), reps: pick('reps') ?? (tg.repLow || 10), sec: pick('sec') ?? 30, min: pick('min') ?? 20,
+      band: s.band || ph.band || '', rir: ui.lastRir[it.id] ?? null, lastTxt: lastSet ? shortSet(lastSet, it.type) : '', sug,
+    };
+    return ui.dock;
+  }
+  function dockHtml(w) {
+    const cur = currentSet(w);
+    const restRow = rest ? `<div class="dock-rest" id="dockRestRow"><span class="small muted">Nghỉ</span><b class="num" id="dockClock">0:00</b><span class="grow"></span><button class="btn sm" data-act="restAdj" data-v="-15">−15</button><button class="btn sm" data-act="restAdj" data-v="15">+15</button><button class="btn sm" data-act="restStop">Bỏ</button><i class="dock-bar" id="dockBar"></i></div>` : '';
+    if (!cur) return w.items.length ? `<div class="dock">${restRow}<button class="btn pri wide" style="min-height:58px;font-size:17px" data-act="open" data-page="finish" data-id="${w.id}">Kết thúc buổi ✓</button></div>` : '';
+    const { it, i } = cur, d = dockInit(w, cur);
+    const n = it.sets.slice(0, i + 1).filter(x => !x.warmup).length, total = it.sets.filter(x => !x.warmup).length;
+    const warm = it.sets[i].warmup;
+    const stepper = (f, label, val) => `<div class="dstep"><button data-act="dockStep" data-f="${f}" data-d="-1" aria-label="Giảm ${label}">−</button><div class="dval"><input class="num" data-dock="${f}" inputmode="decimal" value="${val ?? ''}" aria-label="${label}"><small>${label}</small></div><button data-act="dockStep" data-f="${f}" data-d="1" aria-label="Tăng ${label}">+</button></div>`;
+    let controls;
+    if (it.type === 'cardio') controls = stepper('min', 'phút', d.min);
+    else if (it.type === 'timed') controls = stepper('sec', 'giây', d.sec) + stepper('kg', '+kg', d.kg);
+    else if (it.type === 'band') controls = `<div class="dstep"><div class="dval" style="width:100%"><input data-dock="band" value="${esc(d.band)}" placeholder="dây" aria-label="Dây"><small>dây</small></div></div>` + stepper('reps', it.type === 'unilateral' ? 'reps/bên' : 'reps', d.reps);
+    else controls = stepper('kg', it.type === 'bodyweight' ? '+kg' : isDbItem(it) ? 'kg/quả' : 'kg', d.kg) + stepper('reps', it.type === 'unilateral' ? 'reps/bên' : 'reps', d.reps);
+    const rir = it.type === 'cardio' ? '' : `<div class="drir"><span class="tiny muted">RIR</span>${[0, 1, 2, 3].map(v => `<button class="${d.rir === v ? 'on' : ''}" data-act="dockRir" data-v="${v}">${v === 3 ? '3+' : v}</button>`).join('')}</div>`;
+    return `<div class="dock">${restRow}
+      <div class="dock-head"><b class="ellipsis">${esc(it.name)}</b><span class="small muted num">${warm ? 'Khởi động' : `Hiệp ${n}/${total}`}${d.lastTxt ? ` · trước ${esc(d.lastTxt)}` : ''}</span></div>
+      <div class="dock-main"><div class="dock-ctrls">${controls}</div><button class="dock-ok" data-act="dockTick" aria-label="Hoàn thành hiệp">${I.check}</button></div>${rir}</div>`;
+  }
+  function updateDockValues() {
+    const d = ui.dock; if (!d) return;
+    document.querySelectorAll('[data-dock]').forEach(inp => { const f = inp.dataset.dock; if (document.activeElement !== inp) inp.value = d[f] ?? ''; });
+  }
 
   function shortSet(s, type) {
     if (!s) return '';
@@ -401,6 +457,7 @@
     const cols = COLS[it.type] || COLS.weight;
     const last = L.lastPerformance(db, it.exerciseId, w.id);
     const sug = w.status === 'active' ? L.suggestion(db, it, w.id, db.settings.kgStep) : null;
+    const curSet = w.status === 'active' ? currentSet(w) : null;
     const tg = it.target || {};
     const tgt = it.type === 'cardio' ? '' : `${tg.sets || it.sets.length} × ${tg.repLow ? (tg.repLow === tg.repHigh ? tg.repLow : tg.repLow + '–' + tg.repHigh) : '?'} · nghỉ ${tg.rest || 90}s`;
     let h = `<div class="ex" id="it-${it.id}"><div class="ex-h">${thumb(ex)}<div class="grow"><b>${esc(it.name)}</b><span class="small muted">${esc(tgt)}${last ? ` · lần trước ${fmtDate(last.workout.date)}` : ''}</span></div>
@@ -410,7 +467,8 @@
     it.sets.forEach((s, i) => {
       const { ph, lastSet } = placeholders(w, it, i, last, sug);
       const n = it.sets.slice(0, i + 1).filter(x => !x.warmup).length;
-      h += `<tr class="${s.done ? 'done' : ''}" data-row="${it.id}:${i}"><td class="idx"><button class="${s.warmup ? 'w' : ''}" data-act="warm" data-item="${it.id}" data-set="${i}" aria-label="Đổi hiệp khởi động">${s.warmup ? 'K' : n}</button></td><td class="prev">${esc(shortSet(lastSet, it.type)) || '—'}</td>`;
+      const isCur = curSet && curSet.it === it && curSet.i === i;
+      h += `<tr class="${s.done ? 'done' : ''}${isCur ? ' cur' : ''}" data-row="${it.id}:${i}"><td class="idx"><button class="${s.warmup ? 'w' : ''}" data-act="warm" data-item="${it.id}" data-set="${i}" aria-label="Đổi hiệp khởi động">${s.warmup ? 'K' : n}</button></td><td class="prev">${esc(shortSet(lastSet, it.type)) || '—'}</td>`;
       for (const [f, , mode] of cols) {
         const v = s[f] === undefined || s[f] === null ? '' : s[f];
         h += `<td><input data-item="${it.id}" data-set="${i}" data-f="${f}" value="${esc(v)}" placeholder="${esc(NO_FILL.has(f) ? '' : ph[f] || '')}" data-ph="${esc(NO_FILL.has(f) ? '' : ph[f] || '')}" inputmode="${mode}" ${mode === 'text' ? 'type="text" maxlength="12"' : 'type="text"'} autocomplete="off" enterkeyhint="next"></td>`;
@@ -800,12 +858,40 @@
       await N.schedule({ notifications: [{ id: 7001, channelId: 'rest', title: 'Hết giờ nghỉ', body: rest.label ? 'Tiếp: ' + rest.label : 'Vào hiệp tiếp theo', schedule: { at: new Date(rest.endAt), allowWhileIdle: true } }] });
     } catch (e) { /* notification is a bonus; the in-app timer still runs */ }
   }
+  // complete set i of item it (values already on the set); false when the main metric is missing
+  function commitSet(w, it, i) {
+    const s = it.sets[i];
+    if (!L.setFilled(s, it.type)) { toast(it.type === 'cardio' ? 'Nhập số phút hoặc km' : it.type === 'timed' ? 'Nhập số giây' : 'Nhập số reps'); return false; }
+    if (it.type === 'unilateral' && L.num(s.repsB) === null) s.repsB = s.reps;
+    s.done = true; s.at = new Date().toISOString();
+    const prs = L.detectPR(db, w, it, s);
+    if (prs.length) s.pr = prs.map(p => p.kind); else delete s.pr;
+    save();
+    if (prs.length) {
+      const p = prs[0];
+      toast(`🏆 PR ${p.kind === 'e1rm' ? 'e1RM' : p.kind === 'kg' ? 'tạ' : 'reps'}: ${p.value}${p.kind === 'reps' ? '' : ' kg'} (trước ${p.prev})`, 'pr');
+      if (db.settings.vibrate && navigator.vibrate) navigator.vibrate([60, 40, 60]);
+    }
+    const isLast = it.sets.every(x => x.done);
+    if (w.status === 'active' && db.settings.autoRest && it.type !== 'cardio') {
+      const nxt = currentSet(w);
+      startRest((it.target && it.target.rest) || 90, nxt ? `${nxt.it.name} · hiệp ${nxt.it.sets.slice(0, nxt.i + 1).filter(x => !x.warmup).length}` : (isLast ? 'Bài tiếp theo' : it.name));
+    }
+    return true;
+  }
   function startRest(sec, label) {
     rest = { endAt: Date.now() + sec * 1000, total: sec, label, alerted: false };
     renderRest(); scheduleRestNote();
   }
+  function dockVisible() { const t = top(); const w = t && t.type === 'workout' && wById(t.id); return !!(w && w.status === 'active'); }
   function renderRest() {
     const root = $('#rest-root');
+    if (dockVisible()) {
+      root.innerHTML = '';
+      const has = !!$('#dockRestRow');
+      if (!!rest !== has) renderPage(); // add/remove the rest row inside the dock
+      tick(); return;
+    }
     if (!rest) { root.innerHTML = ''; return; }
     root.innerHTML = `<div class="rest" id="restBox"><div class="clock" id="restClock">0:00</div><div class="grow small"><div class="muted tiny">Nghỉ</div><div class="ellipsis" style="font-weight:600">${esc(rest.label || '')}</div></div><button class="btn sm" data-act="restAdj" data-v="-15">−15</button><button class="btn sm" data-act="restAdj" data-v="15">+15</button><button class="btn sm pri" data-act="restStop">Bỏ</button><div class="bar" id="restBar"></div></div>`;
     tick();
@@ -817,6 +903,10 @@
       if (c) c.textContent = mmss(left > 0 ? Math.ceil(left) : left);
       if (bar) bar.style.width = Math.max(0, Math.min(100, (left / rest.total) * 100)) + '%';
       if (box) box.classList.toggle('over', left <= 0);
+      const dc = $('#dockClock'), db2 = $('#dockBar'), dr = $('#dockRestRow');
+      if (dc) dc.textContent = mmss(left > 0 ? Math.ceil(left) : left);
+      if (db2) db2.style.width = Math.max(0, Math.min(100, (left / rest.total) * 100)) + '%';
+      if (dr) dr.classList.toggle('over', left <= 0);
       if (left <= 0 && !rest.alerted) { rest.alerted = true; alertRest(); }
       if (left < -180) { rest = null; renderRest(); }
     }
@@ -916,20 +1006,42 @@
         ui.untick = null; s.done = false; delete s.pr; save(); render(); return;
       }
       for (const inp of readRowInputs(it.id, i)) { if (inp.value.trim() === '' && inp.dataset.ph) inp.value = inp.dataset.ph; s[inp.dataset.f] = inp.value.trim(); }
-      if (!L.setFilled(s, it.type)) { toast(it.type === 'cardio' ? 'Nhập số phút hoặc km' : it.type === 'timed' ? 'Nhập số giây' : 'Nhập số reps'); return; }
-      if (it.type === 'unilateral' && L.num(s.repsB) === null) s.repsB = s.reps;
-      s.done = true; s.at = new Date().toISOString();
-      const prs = L.detectPR(db, w, it, s);
-      if (prs.length) s.pr = prs.map(p => p.kind); else delete s.pr;
-      save();
-      if (prs.length) {
-        const p = prs[0];
-        toast(`🏆 PR ${p.kind === 'e1rm' ? 'e1RM' : p.kind === 'kg' ? 'tạ' : 'reps'}: ${p.value}${p.kind === 'reps' ? '' : ' kg'} (trước ${p.prev})`, 'pr');
-        if (db.settings.vibrate && navigator.vibrate) navigator.vibrate([60, 40, 60]);
+      if (commitSet(w, it, i)) render();
+    },
+    // ---- dock (one-tap logging) ----
+    dockStep: b => {
+      const d = ui.dock; if (!d) return;
+      const f = b.dataset.f, dir = +b.dataset.d;
+      const cur = currentSet(wById(top().id)); if (!cur) return;
+      if (f === 'kg') d.kg = stepKg(cur.it, d.kg, dir);
+      else if (f === 'reps') d.reps = Math.max(0, (d.reps || 0) + dir);
+      else if (f === 'sec') d.sec = Math.max(0, (d.sec || 0) + 5 * dir);
+      else if (f === 'min') d.min = Math.max(0, L.round1((d.min || 0) + dir));
+      if (db.settings.vibrate && navigator.vibrate) navigator.vibrate(8);
+      updateDockValues();
+    },
+    dockRir: b => { const d = ui.dock; if (!d) return; const v = +b.dataset.v; d.rir = d.rir === v ? null : v; document.querySelectorAll('[data-act="dockRir"]').forEach(x => x.classList.toggle('on', +x.dataset.v === d.rir)); },
+    dockTick: () => {
+      unlockAudio();
+      const w = wById(top().id), cur = currentSet(w), d = ui.dock;
+      if (!cur || !d) return;
+      const { it, i } = cur, s = it.sets[i];
+      if ((it.type === 'weight' || it.type === 'unilateral') && !(L.num(d.kg) > 0)) {
+        toast('Đặt số kg trước — bấm + hoặc chạm vào số'); const k = document.querySelector('[data-dock="kg"]'); if (k) { k.focus(); k.select(); } return;
       }
-      const isLast = it.sets.every(x => x.done);
-      if (w.status === 'active' && db.settings.autoRest && it.type !== 'cardio') startRest((it.target && it.target.rest) || 90, isLast ? 'Bài tiếp theo' : it.name);
+      const str = v => (v === null || v === undefined || v === '') ? '' : String(v);
+      if (it.type === 'cardio') s.min = str(d.min);
+      else if (it.type === 'timed') { s.sec = str(d.sec); s.kg = str(d.kg); }
+      else if (it.type === 'band') { s.band = d.band || ''; s.reps = str(d.reps); }
+      else { s.kg = str(d.kg); s.reps = str(d.reps); if (it.type === 'unilateral' && (L.num(s.repsB) === null || !s.repsB)) s.repsB = s.reps; }
+      if (it.type !== 'cardio') s.rir = d.rir === null || d.rir === undefined ? '' : String(d.rir);
+      if (!commitSet(w, it, i)) return;
+      ui.lastRir[it.id] = d.rir;
+      if (db.settings.vibrate && navigator.vibrate) navigator.vibrate(18);
+      ui.dock = null;
       render();
+      const next = currentSet(w);
+      if (next && next.it !== it) requestAnimationFrame(() => { const el = document.getElementById('it-' + next.it.id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
     },
     warm: b => { const { it } = findItem(b.dataset.item); if (!it) return; const s = it.sets[+b.dataset.set]; s.warmup = !s.warmup; if (s.done) { const { w } = findItem(b.dataset.item); const prs = L.detectPR(db, w, it, s); if (prs.length) s.pr = prs.map(p => p.kind); else delete s.pr; } save(); render(); },
     addSet: b => { const { it } = findItem(b.dataset.item); if (!it) return; it.sets.push({ done: false }); save(); render(); },
@@ -1229,6 +1341,7 @@
     else if (d.wf) { const w = wById(top().id); if (w) { if (d.wf === 'date') { if (t.value) w.date = t.value; } else w[d.wf] = t.value; save(); } }
     else if (d.tf) { const tp = db.templates.find(x => x.id === top().id); if (tp) { tp[d.tf] = t.value; save(); } }
     else if (d.ti !== undefined) { const tp = db.templates.find(x => x.id === top().id); if (tp) { tp.items[+d.ti][d.tif] = L.num(t.value); save(); } }
+    else if (d.dock) { if (ui.dock) ui.dock[d.dock] = d.dock === 'band' ? t.value : L.num(t.value); }
     else if (d.dumbbells !== undefined) { db.settings.dumbbells = t.value.split(/[;,\s]+/).map(x => L.num(x.replace(',', '.'))).filter(v => v > 0).sort((a, b) => a - b); save(); }
     else if (d.prof) { db.profile[d.prof] = d.prof === 'sex' ? t.value : L.num(t.value); save(); }
     else if (d.nut) { db.nutrition[d.nut] = L.num(t.value); save(); }

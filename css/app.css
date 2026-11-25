@@ -204,3 +204,29 @@ details.acc li{margin:4px 0}
 
 .thumb{width:44px;height:44px;border-radius:11px;object-fit:cover;background:var(--s3);flex:none}
 div.thumb{display:grid;place-items:center;color:var(--dim);font-weight:800}
+
+/* one-tap logging dock */
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:40;background:rgba(19,22,27,.97);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:10px 14px calc(10px + var(--safe-b));max-width:640px;margin:0 auto;box-shadow:0 -10px 30px rgba(0,0,0,.45)}
+.dock-head{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+.dock-head b{font-size:15px;max-width:55%}
+.dock-main{display:flex;gap:10px;align-items:stretch}
+.dock-ctrls{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:0}
+.dstep{display:flex;align-items:stretch;background:var(--s3);border-radius:14px;overflow:hidden;min-height:58px}
+.dstep>button{width:40px;flex:none;font-size:24px;font-weight:700;color:var(--tx)}
+.dstep>button:active{background:var(--line)}
+.dval{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.dval input{width:100%;background:transparent;border:0;outline:none;text-align:center;font-size:22px;font-weight:800;color:var(--tx);padding:0}
+.dval small{font-size:10.5px;color:var(--mut);font-weight:600;margin-top:-2px}
+.dock-ok{width:74px;flex:none;border-radius:16px;background:var(--acc);color:var(--acc-ink);display:grid;place-items:center}
+.dock-ok svg{width:34px;height:34px}
+.dock-ok:active{transform:scale(.96)}
+.drir{display:flex;align-items:center;gap:6px;margin-top:8px}
+.drir button{min-width:44px;min-height:34px;border-radius:10px;background:var(--s2);border:1px solid var(--line);font-weight:700;color:var(--mut)}
+.drir button.on{background:var(--acc-soft);border-color:rgba(212,255,58,.45);color:var(--acc)}
+.dock-rest{position:relative;display:flex;align-items:center;gap:8px;margin:-2px 0 10px;padding:6px 10px;border-radius:12px;background:#1d2410;border:1px solid #3d4d14;overflow:hidden}
+.dock-rest b{font-size:22px;color:var(--acc);letter-spacing:-.5px}
+.dock-rest .btn{min-height:34px;padding:0 10px}
+.dock-rest.over{background:#2b1f0a;border-color:#6b4b10}.dock-rest.over b{color:var(--pr)}
+.dock-bar{position:absolute;left:0;bottom:0;height:3px;background:var(--acc)}
+.sets tr.cur td input{border-color:rgba(212,255,58,.5)}
+.sets tr.cur .idx button{background:var(--acc);color:var(--acc-ink)}
